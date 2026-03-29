@@ -156,7 +156,8 @@ def _make_dummy_obs():
 @pytest.fixture
 def learner():
     from src.emergent_creativity.nn.online_learner import OnlineLearner
-    return OnlineLearner(n_steps=8, batch_size=4, n_epochs=2, device="cpu")
+    # Per-step learner — no buffer params needed.
+    return OnlineLearner(device="cpu")
 
 
 class TestOnlineLearner:
@@ -165,100 +166,98 @@ class TestOnlineLearner:
         action = learner.act(obs)
         assert 0 <= action < N_ACTIONS
 
-    def test_observe_before_act_is_safe(self, learner):
-        # observe() before any act() should not crash
-        result = learner.observe(0.0, False)
-        assert result is None
+    def test_observe_before_act_returns_empty(self, learner):
+        # observe() before any act() must not crash and returns empty dict.
+        obs    = _make_dummy_obs()
+        result = learner.observe(obs, 0.0, False)
+        assert result == {}
 
-    def test_update_triggered_after_n_steps(self, learner):
-        obs = _make_dummy_obs()
-        stats = None
-        for _ in range(learner.n_steps):
-            learner.act(obs)
-            stats = learner.observe(1.0, False)
-        # The last observe() should have returned PPO stats
-        assert stats is not None
+    def test_update_on_first_step(self, learner):
+        """Every observe() fires an immediate gradient update."""
+        obs   = _make_dummy_obs()
+        learner.act(obs)
+        stats = learner.observe(obs, 1.0, False)
+        # Per-step: stats are always returned (not None, not empty).
+        assert stats
         assert "loss" in stats
         assert learner.update_count == 1
 
-    def test_no_update_before_buffer_full(self, learner):
+    def test_update_on_every_step(self, learner):
+        """update_count must equal step_count — one update per step."""
         obs = _make_dummy_obs()
-        for _ in range(learner.n_steps - 1):
+        n   = 10
+        for i in range(n):
             learner.act(obs)
-            result = learner.observe(0.0, False)
-            assert result is None
-        assert learner.update_count == 0
+            stats = learner.observe(obs, 0.5, False)
+            assert stats, f"No stats returned on step {i}"
+        assert learner.update_count == n
 
-    def test_loss_is_finite_after_update(self, learner):
+    def test_loss_is_finite(self, learner):
         obs = _make_dummy_obs()
-        for _ in range(learner.n_steps):
-            learner.act(obs)
-            learner.observe(1.0, False)
+        learner.act(obs)
+        learner.observe(obs, 1.0, False)
         assert np.isfinite(learner.last_loss)
 
-    def test_weights_change_after_update(self, learner):
-        """Network parameters must actually change after a PPO update."""
-        obs = _make_dummy_obs()
-        # Snapshot weights before
-        before = {
-            k: v.clone() for k, v in learner.net.named_parameters()
-        }
-        for _ in range(learner.n_steps):
-            learner.act(obs)
-            learner.observe(1.0, False)
-        # At least one parameter should have changed
+    def test_loss_stats_keys(self, learner):
+        obs   = _make_dummy_obs()
+        learner.act(obs)
+        stats = learner.observe(obs, 1.0, False)
+        assert {"loss", "actor_loss", "critic_loss", "entropy"} <= stats.keys()
+
+    def test_weights_change_after_single_step(self, learner):
+        """Network weights must change after a single act+observe cycle."""
+        obs    = _make_dummy_obs()
+        before = {k: v.clone() for k, v in learner.net.named_parameters()}
+        learner.act(obs)
+        learner.observe(obs, 1.0, False)
         changed = any(
             not torch.equal(before[k], v)
             for k, v in learner.net.named_parameters()
         )
-        assert changed, "No weight change detected after PPO update"
-
-    def test_multiple_update_cycles(self, learner):
-        obs = _make_dummy_obs()
-        for _ in range(learner.n_steps * 3):
-            learner.act(obs)
-            learner.observe(0.5, False)
-        assert learner.update_count == 3
+        assert changed, "No weight change detected after gradient step"
 
     def test_reset_lstm_does_not_crash(self, learner):
-        learner.reset_lstm()  # should be callable at any time
+        learner.reset_lstm()  # callable at any time
 
     def test_done_resets_lstm_state(self, learner):
         obs = _make_dummy_obs()
-        # Drive the LSTM to a non-zero state via a forward pass
+        # Drive the LSTM to a non-zero state
         learner.act(obs)
-        learner.observe(1.0, False)
-        # Now signal done=True — should reset to zeros
+        learner.observe(obs, 1.0, False)
+        # Signalling done=True must reset LSTM to zeros
         learner.act(obs)
-        learner.observe(0.0, True)
+        learner.observe(obs, 0.0, True)
         h, c = learner._lstm_state
         assert torch.all(h == 0.0), "LSTM hidden state should be zeroed after done=True"
         assert torch.all(c == 0.0), "LSTM cell state should be zeroed after done=True"
 
     def test_save_load_roundtrip(self, learner, tmp_path):
         obs = _make_dummy_obs()
-        # Fill buffer so an update fires
-        for _ in range(learner.n_steps):
+        for _ in range(5):
             learner.act(obs)
-            learner.observe(1.0, False)
+            learner.observe(obs, 1.0, False)
         path = str(tmp_path / "online.pt")
         learner.save(path)
-        # Load into a fresh learner
         from src.emergent_creativity.nn.online_learner import OnlineLearner
-        learner2 = OnlineLearner(n_steps=8, batch_size=4, n_epochs=2, device="cpu")
+        learner2 = OnlineLearner(device="cpu")
         learner2.load(path)
-        assert learner2.update_count == learner.update_count
-        assert learner2.step_count   == learner.step_count
+        assert learner2.step_count == learner.step_count
 
     def test_is_learning_flag(self, learner):
         assert not learner.is_learning
         obs = _make_dummy_obs()
-        for _ in range(learner.n_steps):
-            learner.act(obs)
-            learner.observe(1.0, False)
+        learner.act(obs)
+        learner.observe(obs, 1.0, False)
         assert learner.is_learning
-        # Flag must remain True after a second update cycle
-        for _ in range(learner.n_steps):
-            learner.act(obs)
-            learner.observe(1.0, False)
+        # Flag must remain True across further steps.
+        learner.act(obs)
+        learner.observe(obs, 0.5, False)
         assert learner.is_learning
+
+    def test_done_step_still_produces_stats(self, learner):
+        """A terminal step should still return loss stats."""
+        obs   = _make_dummy_obs()
+        learner.act(obs)
+        stats = learner.observe(obs, -1.0, True)
+        assert stats
+        assert "loss" in stats

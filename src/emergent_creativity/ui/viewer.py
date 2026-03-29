@@ -136,10 +136,9 @@ class SimViewer:
         self._action_label   = ACTION_LABELS[Action.IDLE]
         self._last_info: dict = {}
 
-        # Learning status (updated by OnlineLearner)
+        # Learning status (updated by OnlineLearner on every step)
         self._update_count: int   = 0
         self._last_loss:    float = 0.0
-        self._is_updating:  bool  = False   # flashes True for one frame
 
         pygame.init()
         self._screen = pygame.display.set_mode((WIN_W, WIN_H))
@@ -157,7 +156,6 @@ class SimViewer:
         """Start the viewer main loop (blocks until quit)."""
         obs, _ = self.env.reset()
         lstm_state = None
-        self._is_updating = False
 
         while self._running:
             # --- Event handling ---
@@ -174,7 +172,6 @@ class SimViewer:
                 continue
 
             # --- Determine action ---
-            self._is_updating = False
             if self._manual_mode:
                 # Check held keys for smooth movement
                 keys = pygame.key.get_pressed()
@@ -186,7 +183,8 @@ class SimViewer:
                 if self._manual_action != Action.IDLE:
                     action = self._manual_action
             elif self.online_learner is not None:
-                # Online learner: infers AND learns
+                # Online learner: forward pass with gradient tracking.
+                # The backward pass (weight update) fires in observe() below.
                 action = self.online_learner.act(obs)
             else:
                 # Legacy static NN agent
@@ -195,7 +193,7 @@ class SimViewer:
             self._action_label = ACTION_LABELS.get(int(action), "?")
 
             # --- Step environment ---
-            obs, reward, terminated, truncated, info = self.env.step(int(action))
+            next_obs, reward, terminated, truncated, info = self.env.step(int(action))
             done = terminated or truncated
             self._step_reward    = reward
             self._total_reward  += reward
@@ -203,17 +201,18 @@ class SimViewer:
             self._last_info      = info
             self._reward_history.append(reward)
 
-            # Online learning: record reward + trigger update if ready.
-            # The manual_mode guard ensures we only observe when the learner
-            # is in control; in manual mode observations would be from a human,
-            # not from the NN policy, which would corrupt the on-policy buffer.
+            # Online learning: immediate per-step gradient update.
+            # The manual_mode guard prevents off-policy updates when the user
+            # is controlling the agent by hand.
             if self.online_learner is not None and not self._manual_mode:
-                stats = self.online_learner.observe(reward, done)
-                if stats is not None:
-                    # A PPO update just occurred
+                stats = self.online_learner.observe(next_obs, reward, done)
+                if stats:
+                    # Every observe() returns stats — update HUD counters.
                     self._update_count = self.online_learner.update_count
                     self._last_loss    = self.online_learner.last_loss
-                    self._is_updating  = True
+
+            # Advance observation for the next iteration.
+            obs = next_obs
 
             if done:
                 self._episode_count += 1
@@ -221,8 +220,10 @@ class SimViewer:
                 self._episode_step   = 0
                 obs, _ = self.env.reset()
                 lstm_state = None
-                if self.online_learner is not None:
-                    self.online_learner.reset_lstm()
+                # OnlineLearner resets its own LSTM inside observe(done=True).
+                # Reset legacy nn_agent if it exposes a reset_lstm() method.
+                if self.nn_agent is not None and hasattr(self.nn_agent, "reset_lstm"):
+                    self.nn_agent.reset_lstm()
 
             # --- Render ---
             self._render(obs)
@@ -422,9 +423,11 @@ class SimViewer:
             surf = self._font_sm.render(line, True, TEXT_COLOR)
             self._screen.blit(surf, (hud_x, hud_y + i * line_h))
 
-        # Flashing "LEARNING" badge when a PPO update just fired
-        if self._is_updating:
-            badge = self._font_lg.render("⚡ LEARNING", True, GOOD_COLOR)
+        # Steady "LEARNING LIVE" badge — always visible when online learner
+        # is in control.  Every env step is a gradient update, so the badge
+        # is always accurate (not just a periodic flash).
+        if self.online_learner is not None and not self._manual_mode:
+            badge = self._font_lg.render("● LEARNING LIVE", True, GOOD_COLOR)
             bx = PANEL_X
             by = hud_y + len(lines) * line_h + 6
             self._screen.blit(badge, (bx, by))

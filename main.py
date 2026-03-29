@@ -38,7 +38,6 @@ def cmd_view(args: argparse.Namespace) -> None:
     try:
         from src.emergent_creativity.nn.online_learner import OnlineLearner
         online_learner = OnlineLearner(
-            n_steps=128,
             device="auto",
             save_dir=args.save_dir if hasattr(args, "save_dir") else "checkpoints",
             save_freq=5000,

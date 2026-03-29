@@ -37,7 +37,6 @@ def main() -> None:
     try:
         from src.emergent_creativity.nn.online_learner import OnlineLearner
         online_learner = OnlineLearner(
-            n_steps=128,
             device="auto",
             save_dir=args.save_dir,
             save_freq=5000,
