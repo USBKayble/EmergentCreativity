@@ -32,41 +32,36 @@ def cmd_view(args: argparse.Namespace) -> None:
     from src.emergent_creativity.sim_env import TenantEnv
     from src.emergent_creativity.ui.viewer import SimViewer
 
-    nn_agent = None
-    if args.nn:
-        try:
-            import torch
-            from src.emergent_creativity.nn.architecture import TenantNetwork
-            from src.emergent_creativity.environment.senses import TOTAL_SENSORY_DIM
-            VITALS_DIM = 4
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            net = TenantNetwork()
-            ck  = torch.load(args.nn, map_location=device)
-            net.load_state_dict(ck["model"])
-            net.to(device)
-            net.eval()
-            lstm_state = [None]  # mutable container
+    online_learner = None
+    nn_agent       = None
 
-            def nn_agent(obs, _):
-                import numpy as np
-                vis = torch.from_numpy(obs["vision"]).float()
-                vis = vis.permute(2, 0, 1).unsqueeze(0).to(device)
-                nv  = np.concatenate([
-                    obs["hearing"], obs["touch"], obs["smell"],
-                    obs["taste"],  obs["vitals"],
-                ])
-                nv  = torch.from_numpy(nv).float().unsqueeze(0).to(device)
-                action, _, _, new_state = net.get_action(vis, nv, lstm_state[0])
-                lstm_state[0] = new_state
-                return action
-
-            print(f"[main] NN agent loaded from {args.nn}")
-        except Exception as e:
-            print(f"[main] Could not load NN agent: {e}. Falling back to manual mode.")
+    try:
+        from src.emergent_creativity.nn.online_learner import OnlineLearner
+        online_learner = OnlineLearner(
+            n_steps=128,
+            device="auto",
+            save_dir=args.save_dir if hasattr(args, "save_dir") else "checkpoints",
+            save_freq=5000,
+        )
+        if args.nn:
+            try:
+                online_learner.load(args.nn)
+                print(f"[main] OnlineLearner loaded from {args.nn}")
+            except Exception as e:
+                print(f"[main] Could not load checkpoint {args.nn}: {e}")
+        else:
+            print("[main] OnlineLearner starting fresh — will learn from scratch.")
+    except ImportError as e:
+        print(f"[main] PyTorch unavailable — falling back to manual mode ({e})")
 
     print("[main] Starting viewer … (close window or press Q to exit)")
     env = TenantEnv(gui=args.gui)
-    viewer = SimViewer(env, nn_agent=nn_agent, target_fps=args.fps)
+    viewer = SimViewer(
+        env,
+        nn_agent=nn_agent,
+        online_learner=online_learner,
+        target_fps=args.fps,
+    )
     viewer.run()
 
 
@@ -99,9 +94,10 @@ def main() -> None:
 
     # ---- view ----
     vp = sub.add_parser("view", help="Launch interactive viewer")
-    vp.add_argument("--nn",  type=str,  default=None, help="Path to NN checkpoint")
-    vp.add_argument("--gui", action="store_true",     help="Use PyBullet GUI window")
-    vp.add_argument("--fps", type=int,  default=30,   help="Target FPS")
+    vp.add_argument("--nn",       type=str,  default=None, help="Path to checkpoint to resume from")
+    vp.add_argument("--gui",      action="store_true",     help="Use PyBullet GUI window")
+    vp.add_argument("--fps",      type=int,  default=30,   help="Target FPS")
+    vp.add_argument("--save-dir", type=str,  default="checkpoints", help="Auto-checkpoint directory")
 
     # ---- train ----
     tp = sub.add_parser("train", help="Train the NN agent")

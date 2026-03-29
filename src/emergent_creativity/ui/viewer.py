@@ -98,24 +98,33 @@ class SimViewer:
 
     Parameters
     ----------
-    env        : TenantEnv  – already-initialised (or will be reset here)
-    nn_agent   : optional callable (obs → action)  – if provided, used in NN mode
-    target_fps : int
+    env           : TenantEnv – already-initialised (or will be reset here)
+    nn_agent      : optional callable ``(obs, lstm_state) → action`` –
+                    static inference only (legacy; no online learning).
+    online_learner: optional ``OnlineLearner`` instance – preferred over
+                    *nn_agent*.  Performs online PPO updates while the
+                    simulation runs.
+    target_fps    : int
     """
 
     def __init__(
         self,
         env: TenantEnv,
         nn_agent=None,
+        online_learner=None,
         target_fps: int = 30,
     ) -> None:
         _require_pygame()
-        self.env        = env
-        self.nn_agent   = nn_agent
-        self.target_fps = target_fps
+        self.env            = env
+        self.nn_agent       = nn_agent
+        self.online_learner = online_learner
+        self.target_fps     = target_fps
+
+        # Online learner takes precedence over legacy nn_agent
+        self._has_nn = (online_learner is not None) or (nn_agent is not None)
 
         self._paused        = False
-        self._manual_mode   = nn_agent is None
+        self._manual_mode   = not self._has_nn
         self._manual_action = Action.IDLE
         self._running       = True
 
@@ -126,6 +135,11 @@ class SimViewer:
         self._reward_history: deque = deque(maxlen=200)
         self._action_label   = ACTION_LABELS[Action.IDLE]
         self._last_info: dict = {}
+
+        # Learning status (updated by OnlineLearner)
+        self._update_count: int   = 0
+        self._last_loss:    float = 0.0
+        self._is_updating:  bool  = False   # flashes True for one frame
 
         pygame.init()
         self._screen = pygame.display.set_mode((WIN_W, WIN_H))
@@ -143,6 +157,7 @@ class SimViewer:
         """Start the viewer main loop (blocks until quit)."""
         obs, _ = self.env.reset()
         lstm_state = None
+        self._is_updating = False
 
         while self._running:
             # --- Event handling ---
@@ -159,6 +174,7 @@ class SimViewer:
                 continue
 
             # --- Determine action ---
+            self._is_updating = False
             if self._manual_mode:
                 # Check held keys for smooth movement
                 keys = pygame.key.get_pressed()
@@ -169,26 +185,44 @@ class SimViewer:
                         break
                 if self._manual_action != Action.IDLE:
                     action = self._manual_action
+            elif self.online_learner is not None:
+                # Online learner: infers AND learns
+                action = self.online_learner.act(obs)
             else:
-                # NN agent chooses action
+                # Legacy static NN agent
                 action = self._nn_act(obs, lstm_state)
 
             self._action_label = ACTION_LABELS.get(int(action), "?")
 
             # --- Step environment ---
             obs, reward, terminated, truncated, info = self.env.step(int(action))
+            done = terminated or truncated
             self._step_reward    = reward
             self._total_reward  += reward
             self._episode_step  += 1
             self._last_info      = info
             self._reward_history.append(reward)
 
-            if terminated or truncated:
+            # Online learning: record reward + trigger update if ready.
+            # The manual_mode guard ensures we only observe when the learner
+            # is in control; in manual mode observations would be from a human,
+            # not from the NN policy, which would corrupt the on-policy buffer.
+            if self.online_learner is not None and not self._manual_mode:
+                stats = self.online_learner.observe(reward, done)
+                if stats is not None:
+                    # A PPO update just occurred
+                    self._update_count = self.online_learner.update_count
+                    self._last_loss    = self.online_learner.last_loss
+                    self._is_updating  = True
+
+            if done:
                 self._episode_count += 1
                 self._total_reward   = 0.0
                 self._episode_step   = 0
                 obs, _ = self.env.reset()
                 lstm_state = None
+                if self.online_learner is not None:
+                    self.online_learner.reset_lstm()
 
             # --- Render ---
             self._render(obs)
@@ -197,7 +231,7 @@ class SimViewer:
         pygame.quit()
 
     def _nn_act(self, obs, lstm_state):
-        """Call the NN agent callable (if provided)."""
+        """Call the legacy static NN agent callable (if provided)."""
         if self.nn_agent is None:
             return Action.IDLE
         try:
@@ -217,9 +251,11 @@ class SimViewer:
             self.env.reset()
             self._total_reward  = 0.0
             self._episode_step  = 0
+            if self.online_learner is not None:
+                self.online_learner.reset_lstm()
         elif key == pygame.K_i:
             self._manual_mode = not self._manual_mode
-            mode = "Manual" if self._manual_mode else "NN"
+            mode = "Manual" if self._manual_mode else "NN (online learning)"
             print(f"[Viewer] Switched to {mode} control")
         else:
             for k, a in MANUAL_ACTION_MAP.items():
@@ -357,7 +393,12 @@ class SimViewer:
         hud_y = MAP_H + 160
         line_h = 22
 
-        mode_str = "MANUAL" if self._manual_mode else "NN AGENT"
+        if self._manual_mode:
+            mode_str = "MANUAL"
+        elif self.online_learner is not None:
+            mode_str = "NN (ONLINE LEARNING)"
+        else:
+            mode_str = "NN AGENT"
         paused_str = " [PAUSED]" if self._paused else ""
 
         lines = [
@@ -370,9 +411,23 @@ class SimViewer:
             f"Mess:    {self._last_info.get('mess_count', '?')}",
         ]
 
+        # Append online-learning stats when active
+        if self.online_learner is not None and not self._manual_mode:
+            lines += [
+                f"Updates: {self._update_count}",
+                f"Loss:    {self._last_loss:.4f}",
+            ]
+
         for i, line in enumerate(lines):
             surf = self._font_sm.render(line, True, TEXT_COLOR)
             self._screen.blit(surf, (hud_x, hud_y + i * line_h))
+
+        # Flashing "LEARNING" badge when a PPO update just fired
+        if self._is_updating:
+            badge = self._font_lg.render("⚡ LEARNING", True, GOOD_COLOR)
+            bx = PANEL_X
+            by = hud_y + len(lines) * line_h + 6
+            self._screen.blit(badge, (bx, by))
 
         # Controls hint
         hint_y = WIN_H - 110

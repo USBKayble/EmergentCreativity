@@ -65,7 +65,7 @@ class TestTenantNetworkShapes:
         assert torch.all(cx == 0.0)
 
     def test_get_action_returns_valid_action(self, net, dummy_batch):
-        vision, nv = dummy_batch[0].unsqueeze(0), dummy_batch[1].unsqueeze(0)
+        vision, nv = dummy_batch
         action, log_prob, value, state = net.get_action(vision[:1], nv[:1])
         assert 0 <= action < N_ACTIONS
         assert isinstance(action, int)
@@ -95,9 +95,10 @@ class TestTenantNetworkShapes:
         assert torch.all(entropy >= 0.0)
 
     def test_deterministic_action_is_argmax(self, net, dummy_batch):
-        vision, nv = dummy_batch[0].unsqueeze(0), dummy_batch[1].unsqueeze(0)
-        action_det, _, _, _ = net.get_action(vision, nv, deterministic=True)
-        logits, _, _ = net(vision, nv)
+        vision, nv = dummy_batch
+        net.eval()  # disable dropout so both forward passes are identical
+        action_det, _, _, _ = net.get_action(vision[:1], nv[:1], deterministic=True)
+        logits, _, _ = net(vision[:1], nv[:1])
         expected = int(logits.argmax(dim=-1).item())
         assert action_det == expected
 
@@ -130,3 +131,134 @@ class TestSensoryEncoder:
         dummy = torch.zeros(1, NON_VISUAL_DIM)
         out   = enc(dummy)
         assert out.shape == (1, enc.out_dim)
+
+
+# ---------------------------------------------------------------------------
+# OnlineLearner tests
+# ---------------------------------------------------------------------------
+
+def _make_dummy_obs():
+    """Return a minimal observation dict matching TenantEnv's obs space."""
+    from src.emergent_creativity.environment.senses import (
+        VISION_H, VISION_W, VISION_C,
+        HEARING_DIM, TOUCH_DIM, SMELL_DIM, TASTE_DIM,
+    )
+    return {
+        "vision":   np.zeros((VISION_H, VISION_W, VISION_C), dtype=np.float32),
+        "hearing":  np.zeros(HEARING_DIM, dtype=np.float32),
+        "touch":    np.zeros(TOUCH_DIM,   dtype=np.float32),
+        "smell":    np.zeros(SMELL_DIM,   dtype=np.float32),
+        "taste":    np.zeros(TASTE_DIM,   dtype=np.float32),
+        "vitals":   np.zeros(VITALS_DIM,  dtype=np.float32),
+    }
+
+
+@pytest.fixture
+def learner():
+    from src.emergent_creativity.nn.online_learner import OnlineLearner
+    return OnlineLearner(n_steps=8, batch_size=4, n_epochs=2, device="cpu")
+
+
+class TestOnlineLearner:
+    def test_act_returns_valid_action(self, learner):
+        obs    = _make_dummy_obs()
+        action = learner.act(obs)
+        assert 0 <= action < N_ACTIONS
+
+    def test_observe_before_act_is_safe(self, learner):
+        # observe() before any act() should not crash
+        result = learner.observe(0.0, False)
+        assert result is None
+
+    def test_update_triggered_after_n_steps(self, learner):
+        obs = _make_dummy_obs()
+        stats = None
+        for _ in range(learner.n_steps):
+            learner.act(obs)
+            stats = learner.observe(1.0, False)
+        # The last observe() should have returned PPO stats
+        assert stats is not None
+        assert "loss" in stats
+        assert learner.update_count == 1
+
+    def test_no_update_before_buffer_full(self, learner):
+        obs = _make_dummy_obs()
+        for _ in range(learner.n_steps - 1):
+            learner.act(obs)
+            result = learner.observe(0.0, False)
+            assert result is None
+        assert learner.update_count == 0
+
+    def test_loss_is_finite_after_update(self, learner):
+        obs = _make_dummy_obs()
+        for _ in range(learner.n_steps):
+            learner.act(obs)
+            learner.observe(1.0, False)
+        assert np.isfinite(learner.last_loss)
+
+    def test_weights_change_after_update(self, learner):
+        """Network parameters must actually change after a PPO update."""
+        obs = _make_dummy_obs()
+        # Snapshot weights before
+        before = {
+            k: v.clone() for k, v in learner.net.named_parameters()
+        }
+        for _ in range(learner.n_steps):
+            learner.act(obs)
+            learner.observe(1.0, False)
+        # At least one parameter should have changed
+        changed = any(
+            not torch.equal(before[k], v)
+            for k, v in learner.net.named_parameters()
+        )
+        assert changed, "No weight change detected after PPO update"
+
+    def test_multiple_update_cycles(self, learner):
+        obs = _make_dummy_obs()
+        for _ in range(learner.n_steps * 3):
+            learner.act(obs)
+            learner.observe(0.5, False)
+        assert learner.update_count == 3
+
+    def test_reset_lstm_does_not_crash(self, learner):
+        learner.reset_lstm()  # should be callable at any time
+
+    def test_done_resets_lstm_state(self, learner):
+        obs = _make_dummy_obs()
+        # Drive the LSTM to a non-zero state via a forward pass
+        learner.act(obs)
+        learner.observe(1.0, False)
+        # Now signal done=True — should reset to zeros
+        learner.act(obs)
+        learner.observe(0.0, True)
+        h, c = learner._lstm_state
+        assert torch.all(h == 0.0), "LSTM hidden state should be zeroed after done=True"
+        assert torch.all(c == 0.0), "LSTM cell state should be zeroed after done=True"
+
+    def test_save_load_roundtrip(self, learner, tmp_path):
+        obs = _make_dummy_obs()
+        # Fill buffer so an update fires
+        for _ in range(learner.n_steps):
+            learner.act(obs)
+            learner.observe(1.0, False)
+        path = str(tmp_path / "online.pt")
+        learner.save(path)
+        # Load into a fresh learner
+        from src.emergent_creativity.nn.online_learner import OnlineLearner
+        learner2 = OnlineLearner(n_steps=8, batch_size=4, n_epochs=2, device="cpu")
+        learner2.load(path)
+        assert learner2.update_count == learner.update_count
+        assert learner2.step_count   == learner.step_count
+
+    def test_is_learning_flag(self, learner):
+        assert not learner.is_learning
+        obs = _make_dummy_obs()
+        for _ in range(learner.n_steps):
+            learner.act(obs)
+            learner.observe(1.0, False)
+        assert learner.is_learning
+        # Flag must remain True after a second update cycle
+        for _ in range(learner.n_steps):
+            learner.act(obs)
+            learner.observe(1.0, False)
+        assert learner.is_learning
