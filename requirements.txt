@@ -1,0 +1,27 @@
+# Core simulation and physics
+pybullet>=3.2.5
+
+# Reinforcement learning environment interface
+gymnasium>=0.29.1
+
+# Neural network and deep learning (GPU supported via CUDA)
+torch>=2.1.0
+torchvision>=0.16.0
+
+# RL algorithms (PPO, SAC, etc.)
+stable-baselines3>=2.2.1
+
+# Rendering and UI
+pygame>=2.5.0
+
+# Configuration and utilities
+pyyaml>=6.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Training visualisation
+tensorboard>=2.14.0
+tensorboardX>=2.6.2
+
+# Optional: faster numerical computations
+scipy>=1.11.0
