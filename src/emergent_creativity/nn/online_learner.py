@@ -36,6 +36,7 @@ Usage
         if done:
             obs, _ = env.reset()
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -48,6 +49,7 @@ try:
     import torch.nn as nn
     import torch.nn.functional as F
     import torch.optim as optim
+
     _TORCH = True
 except ImportError:
     _TORCH = False
@@ -56,7 +58,7 @@ from .architecture import TenantNetwork
 from ..environment.senses import VISION_H, VISION_W, VISION_C, TOTAL_SENSORY_DIM
 from ..tenant.actions import N_ACTIONS
 
-VITALS_DIM     = 4
+VITALS_DIM = 4
 NON_VISUAL_DIM = TOTAL_SENSORY_DIM + VITALS_DIM
 
 
@@ -90,13 +92,14 @@ class OnlineLearner:
     def __init__(
         self,
         learning_rate: float = 3e-4,
-        gamma:         float = 0.99,
-        ent_coef:      float = 0.01,
-        vf_coef:       float = 0.5,
+        gamma: float = 0.99,
+        ent_coef: float = 0.01,
+        vf_coef: float = 0.5,
         max_grad_norm: float = 0.5,
-        device:        str   = "auto",
-        save_dir:      str   = "checkpoints",
-        save_freq:     int   = 0,
+        device: str = "auto",
+        save_dir: str = "checkpoints",
+        save_freq: int = 0,
+        use_amp: bool = True,
     ) -> None:
         _require_torch()
 
@@ -105,36 +108,30 @@ class OnlineLearner:
         else:
             self.device = torch.device(device)
 
-        self.gamma         = gamma
-        self.ent_coef      = ent_coef
-        self.vf_coef       = vf_coef
+        self.gamma = gamma
+        self.ent_coef = ent_coef
+        self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
-        self.save_freq     = save_freq
-        self.save_dir      = Path(save_dir)
+        self.save_freq = save_freq
+        self.save_dir = Path(save_dir)
+        self.use_amp = use_amp and self.device.type == "cuda"
 
-        # Network — permanently in train() mode so batch-norm/dropout work
-        # correctly and gradients accumulate for every step.
         self.net = TenantNetwork(n_actions=N_ACTIONS).to(self.device)
         self.net.train()
 
-        self.optimizer = optim.Adam(
-            self.net.parameters(), lr=learning_rate, eps=1e-5
-        )
+        self.optimizer = optim.Adam(self.net.parameters(), lr=learning_rate, eps=1e-5)
 
-        # LSTM hidden state (persistent across steps, zeroed on episode end).
         self._lstm_state: Optional[Tuple] = self.net.get_initial_state(
             1, device=self.device
         )
-
-        # Tensors stored by act(), consumed (and freed) by observe().
-        self._pending_log_prob: Optional["torch.Tensor"] = None
-        self._pending_value:    Optional["torch.Tensor"] = None
-        self._pending_entropy:  Optional["torch.Tensor"] = None
+        self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
+        self._gradient_accumulation_steps = 4
+        self._accumulated_steps = 0
 
         # Statistics
-        self._step_count: int   = 0
-        self._last_loss:  float = 0.0
-        self._last_stats: Dict  = {}
+        self._step_count: int = 0
+        self._last_loss: float = 0.0
+        self._last_stats: Dict = {}
 
         print(
             f"[OnlineLearner] Initialised on {self.device}. "
@@ -164,13 +161,13 @@ class OnlineLearner:
         # Forward pass — keep computational graph (no torch.no_grad).
         logits, value, new_state = self.net(vision_t, non_vis_t, self._lstm_state)
 
-        dist   = torch.distributions.Categorical(logits=logits)
+        dist = torch.distributions.Categorical(logits=logits)
         action = dist.sample()
 
         # Store tensors needed for the backward pass in observe().
-        self._pending_log_prob = dist.log_prob(action)   # (1,)  grad retained
-        self._pending_value    = value                   # (1,1) grad retained
-        self._pending_entropy  = dist.entropy()          # (1,)
+        self._pending_log_prob = dist.log_prob(action)  # (1,)  grad retained
+        self._pending_value = value  # (1,1) grad retained
+        self._pending_entropy = dist.entropy()  # (1,)
 
         # Detach the LSTM state: gradients must not flow through the full
         # episode history (truncated BPTT).
@@ -214,37 +211,53 @@ class OnlineLearner:
             next_vision, next_nv = self._obs_to_tensors(next_obs)
             with torch.no_grad():
                 _, next_value, _ = self.net(next_vision, next_nv, self._lstm_state)
-            td_target = reward + self.gamma * next_value   # (1, 1)
+            td_target = reward + self.gamma * next_value  # (1, 1)
 
         # ---- Actor-Critic loss ----------------------------------------
         # Advantage: stop gradient so only the actor head is guided by it.
-        advantage  = (td_target - self._pending_value).detach()
+        advantage = (td_target - self._pending_value).detach()
         actor_loss = -(self._pending_log_prob * advantage.squeeze()).mean()
         critic_loss = F.mse_loss(self._pending_value, td_target)
-        entropy     = self._pending_entropy.mean()
+        entropy = self._pending_entropy.mean()
 
-        loss = actor_loss + self.vf_coef * critic_loss - self.ent_coef * entropy
+        loss = (
+            actor_loss + self.vf_coef * critic_loss - self.ent_coef * entropy
+        ) / self._gradient_accumulation_steps
 
         # ---- Gradient step --------------------------------------------
         self.optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
-        self.optimizer.step()
+        if self.use_amp and self.scaler is not None:
+            self.scaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+        self._accumulated_steps += 1
+
+        if self._accumulated_steps >= self._gradient_accumulation_steps:
+            if self.use_amp and self.scaler is not None:
+                self.scaler.unscale_(self.optimizer)
+            nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
+            if self.use_amp and self.scaler is not None:
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                self.optimizer.step()
+            self._accumulated_steps = 0
 
         # Free the retained graph tensors.
         self._pending_log_prob = None
-        self._pending_value    = None
-        self._pending_entropy  = None
+        self._pending_value = None
+        self._pending_entropy = None
 
         # ---- Statistics -----------------------------------------------
         self._step_count += 1
         stats = {
-            "loss":        loss.item(),
-            "actor_loss":  actor_loss.item(),
+            "loss": loss.item(),
+            "actor_loss": actor_loss.item(),
             "critic_loss": critic_loss.item(),
-            "entropy":     entropy.item(),
+            "entropy": entropy.item(),
         }
-        self._last_loss  = stats["loss"]
+        self._last_loss = stats["loss"]
         self._last_stats = stats
 
         if self.save_freq > 0 and self._step_count % self.save_freq == 0:
@@ -288,15 +301,18 @@ class OnlineLearner:
     # Observation helpers
     # ------------------------------------------------------------------
 
-    def _obs_to_tensors(
-        self, obs: dict
-    ) -> Tuple["torch.Tensor", "torch.Tensor"]:
-        vision  = torch.from_numpy(obs["vision"]).float()
-        vision  = vision.permute(2, 0, 1).unsqueeze(0).to(self.device)
-        non_vis = np.concatenate([
-            obs["hearing"], obs["touch"], obs["smell"],
-            obs["taste"],  obs["vitals"],
-        ])
+    def _obs_to_tensors(self, obs: dict) -> Tuple["torch.Tensor", "torch.Tensor"]:
+        vision = torch.from_numpy(obs["vision"]).float()
+        vision = vision.permute(2, 0, 1).unsqueeze(0).to(self.device)
+        non_vis = np.concatenate(
+            [
+                obs["hearing"],
+                obs["touch"],
+                obs["smell"],
+                obs["taste"],
+                obs["vitals"],
+            ]
+        )
         non_vis = torch.from_numpy(non_vis).float().unsqueeze(0).to(self.device)
         return vision, non_vis
 
@@ -308,8 +324,8 @@ class OnlineLearner:
         """Save model + optimiser state to *path*."""
         torch.save(
             {
-                "step":      self._step_count,
-                "model":     self.net.state_dict(),
+                "step": self._step_count,
+                "model": self.net.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
             },
             path,

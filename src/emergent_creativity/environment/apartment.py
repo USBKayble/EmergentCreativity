@@ -21,6 +21,7 @@ Rooms are separated by thin walls with doorway openings.
 All furniture is created as static boxes (mass=0).
 Pickable objects (food, books, mess) are dynamic.
 """
+
 from __future__ import annotations
 
 import math
@@ -56,21 +57,22 @@ from .objects import (
 # ---------------------------------------------------------------------------
 # Room dimensions (metres)
 # ---------------------------------------------------------------------------
-ROOM_W = 5.0      # width  of each room
-ROOM_D = 5.0      # depth  of each room
-WALL_T = 0.15     # wall thickness
-CEILING_H = 2.8   # room height
-DOOR_W = 0.9      # doorway width
-DOOR_H = 2.1      # doorway height
+ROOM_W = 5.0  # width  of each room
+ROOM_D = 5.0  # depth  of each room
+WALL_T = 0.15  # wall thickness
+CEILING_H = 2.8  # room height
+DOOR_W = 0.9  # doorway width
+DOOR_H = 2.1  # doorway height
 
-FLOOR_COLOR  = (0.75, 0.70, 0.65, 1.0)
-WALL_COLOR   = (0.92, 0.90, 0.86, 1.0)
+FLOOR_COLOR = (0.75, 0.70, 0.65, 1.0)
+WALL_COLOR = (0.92, 0.90, 0.86, 1.0)
 CEILING_COLOR = (0.97, 0.97, 0.97, 1.0)
 
 
 # ---------------------------------------------------------------------------
 # Apartment
 # ---------------------------------------------------------------------------
+
 
 class Apartment:
     """
@@ -95,7 +97,7 @@ class Apartment:
         self._world = world
         self._registry = registry
         self._rng = random.Random(seed)
-        self._static_ids: List[int] = []   # walls, floors, ceilings
+        self._static_ids: List[int] = []  # walls, floors, ceilings
         self._furniture: List[WorldObject] = []
         self._items: List[WorldObject] = []
 
@@ -127,13 +129,31 @@ class Apartment:
         Update cached positions in the registry from the physics engine.
         Call this once per simulation step.
         """
-        for obj in self._furniture + self._items:
-            if obj.body_id >= 0:
+        valid_items = []
+        for obj in self._items:
+            if obj.body_id < 0:
+                continue
+            if obj.consumed:
+                continue
+            try:
                 pos, _ = self._world.get_position_orientation(obj.body_id)
                 self._registry.update_position(obj.body_id, pos)
-                # Check if dynamic item has fallen to the floor
                 if obj.can_pick_up and not obj.held_by_agent:
                     obj.on_floor = pos[2] < 0.15
+                valid_items.append(obj)
+            except Exception:
+                pass
+        self._items = valid_items
+
+        for obj in self._furniture:
+            if obj.body_id >= 0:
+                try:
+                    pos, _ = self._world.get_position_orientation(obj.body_id)
+                    self._registry.update_position(obj.body_id, pos)
+                    if obj.can_pick_up and not obj.held_by_agent:
+                        obj.on_floor = pos[2] < 0.15
+                except Exception:
+                    pass
 
     @property
     def furniture(self) -> List[WorldObject]:
@@ -272,10 +292,10 @@ class Apartment:
         """
         hw = WALL_T / 2
         dw2 = DOOR_W / 2
-        h2  = CEILING_H / 2
+        h2 = CEILING_H / 2
         span_len = span_end - span_start
 
-        door_left  = door_center - dw2
+        door_left = door_center - dw2
         door_right = door_center + dw2
 
         # Above doorway lintel

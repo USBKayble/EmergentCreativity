@@ -9,11 +9,11 @@
 #   per_step  : if true the reward is applied every simulation step
 #                while the condition is active (instead of once on trigger)
 #   condition : optional expression that must be true for the rule to fire
-#               supported variables: hunger, energy, happiness, mess_count,
-#               idle_steps, is_eating, is_sleeping, is_watching_tv,
-#               is_reading, holding_food, holding_mess, surface_clean
 #
-# Rewards are summed each step and passed to the neural network.
+# Reward structure:
+#   - Vitals decline continuously (handled in code, not here)
+#   - Action rewards: positive for completing desired actions
+#   - Direction rewards: positive for moving toward solutions (handled in code)
 # =============================================================================
 
 rules:
@@ -34,27 +34,12 @@ rules:
   - name: mess_on_floor_penalty
     per_step: true
     condition: "mess_count > 0"
-    reward: -0.1          # small per-step penalty per mess item
-
-  - name: heavy_mess_penalty
-    per_step: true
-    condition: "mess_count > 5"
-    reward: -0.3          # additional per-step penalty when very messy
+    reward: -0.1
 
   # ── Hunger & Eating ──────────────────────────────────────────────────────────
   - name: eat_food
     event: ate_food
     reward: 10.0
-
-  - name: hungry_penalty
-    per_step: true
-    condition: "hunger > 0.6"
-    reward: -0.5          # hunger is 0–1; high hunger is bad
-
-  - name: starving_penalty
-    per_step: true
-    condition: "hunger > 0.85"
-    reward: -1.5          # severe starvation
 
   # ── Energy / Sleep ───────────────────────────────────────────────────────────
   - name: sleep_reward
@@ -62,17 +47,7 @@ rules:
     per_step: true
     reward: 1.5
 
-  - name: tired_penalty
-    per_step: true
-    condition: "energy < 0.25"
-    reward: -0.4
-
-  - name: exhausted_penalty
-    per_step: true
-    condition: "energy < 0.1"
-    reward: -1.0
-
-  # ── Entertainment ────────────────────────────────────────────────────────────
+  # ── Entertainment (action rewards) ────────────────────────────────────────────
   - name: watch_tv
     event: watching_tv
     per_step: true
@@ -94,49 +69,32 @@ rules:
     condition: "idle_steps > 100"
     reward: -0.2
 
-  - name: prolonged_idle_penalty
-    per_step: true
-    condition: "idle_steps > 300"
-    reward: -0.5
-
-  # ── Social / Happiness ───────────────────────────────────────────────────────
-  - name: low_happiness_penalty
-    per_step: true
-    condition: "happiness < 0.3"
-    reward: -0.3
-
-  - name: high_happiness_reward
-    per_step: true
-    condition: "happiness > 0.75"
-    reward: 0.2
-
   # ── Hygiene ──────────────────────────────────────────────────────────────────
   - name: use_bathroom
     event: used_bathroom
     reward: 4.0
 
-  - name: bladder_full_penalty
-    per_step: true
-    condition: "bladder > 0.8"
-    reward: -0.6
+  - name: failed_bathroom
+    event: failed_bathroom_attempt
+    reward: -3.0
 
 # =============================================================================
 # Vitals configuration – how fast each vital changes over time
 # =============================================================================
 vitals:
-  hunger_rate:   0.0002   # hunger increase per simulation step
-  energy_drain:  0.0001   # energy decrease per step (awake)
-  energy_regen:  0.0005   # energy increase per step (sleeping)
-  bladder_rate:  0.00015  # bladder fill rate per step
+  hunger_rate:   0.0002
+  energy_drain:  0.0001
+  energy_regen:  0.0005
+  bladder_rate:  0.00015
   happiness_decay: 0.00005
 
 # =============================================================================
-# Terminal conditions – episode ends if any of these trigger
+# Terminal conditions – disabled for continuous training
 # =============================================================================
 terminal:
-  hunger_max: 1.0         # episode ends if hunger reaches 1.0 (starvation)
-  energy_min: 0.0         # episode ends if energy reaches 0.0 (collapse)
-  max_steps: 50000        # max steps per episode
+  hunger_max: 100.0
+  energy_min: -100.0
+  max_steps: 999999999
 
 # =============================================================================
 # Observation space settings
@@ -144,6 +102,6 @@ terminal:
 observation:
   vision_width:  84
   vision_height: 84
-  vision_fov:    90        # degrees
-  hearing_radius: 10.0    # metres
+  vision_fov:    90
+  hearing_radius: 10.0
   smell_radius:   3.0

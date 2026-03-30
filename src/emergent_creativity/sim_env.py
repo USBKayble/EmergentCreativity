@@ -39,6 +39,7 @@ Example
             obs, info = env.reset()
     env.close()
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -49,11 +50,13 @@ import numpy as np
 try:
     import gymnasium as gym
     from gymnasium import spaces
+
     _GYM = True
 except ImportError:
     try:
         import gym
         from gym import spaces
+
         _GYM = True
     except ImportError:
         _GYM = False
@@ -63,8 +66,13 @@ from .environment.objects import ObjectRegistry
 from .environment.apartment import Apartment
 from .environment.senses import (
     SensorySuite,
-    VISION_H, VISION_W, VISION_C,
-    HEARING_DIM, TOUCH_DIM, SMELL_DIM, TASTE_DIM,
+    VISION_H,
+    VISION_W,
+    VISION_C,
+    HEARING_DIM,
+    TOUCH_DIM,
+    SMELL_DIM,
+    TASTE_DIM,
 )
 from .tenant.agent import Tenant
 from .tenant.actions import N_ACTIONS
@@ -75,9 +83,7 @@ DEFAULT_CONFIG = Path(__file__).parents[2] / "config" / "rewards.yaml"
 
 def _require_gym() -> None:
     if not _GYM:
-        raise ImportError(
-            "gymnasium (or gym) is required. pip install gymnasium"
-        )
+        raise ImportError("gymnasium (or gym) is required. pip install gymnasium")
 
 
 class TenantEnv:
@@ -103,9 +109,9 @@ class TenantEnv:
     ) -> None:
         _require_gym()
 
-        self._gui         = gui
-        self._seed        = seed
-        self.render_mode  = render_mode
+        self._gui = gui
+        self._seed = seed
+        self.render_mode = render_mode
 
         # Load reward config
         cfg_path = str(config_path or DEFAULT_CONFIG)
@@ -114,32 +120,37 @@ class TenantEnv:
         # Read observation settings from YAML
         try:
             import yaml
+
             with open(cfg_path, "r", encoding="utf-8") as fh:
                 raw = yaml.safe_load(fh)
             obs_cfg = raw.get("observation", {})
         except Exception:
             pass
 
-        w = obs_cfg.get("vision_width",  VISION_W)
+        w = obs_cfg.get("vision_width", VISION_W)
         h = obs_cfg.get("vision_height", VISION_H)
 
         # Gymnasium spaces
-        self.observation_space = spaces.Dict({
-            "vision":  spaces.Box(0.0, 1.0, shape=(h, w, VISION_C), dtype=np.float32),
-            "hearing": spaces.Box(0.0, 1.0, shape=(HEARING_DIM,),   dtype=np.float32),
-            "touch":   spaces.Box(0.0, 1.0, shape=(TOUCH_DIM,),     dtype=np.float32),
-            "smell":   spaces.Box(0.0, 1.0, shape=(SMELL_DIM,),     dtype=np.float32),
-            "taste":   spaces.Box(0.0, 1.0, shape=(TASTE_DIM,),     dtype=np.float32),
-            "vitals":  spaces.Box(0.0, 1.0, shape=(4,),             dtype=np.float32),
-        })
+        self.observation_space = spaces.Dict(
+            {
+                "vision": spaces.Box(
+                    0.0, 1.0, shape=(h, w, VISION_C), dtype=np.float32
+                ),
+                "hearing": spaces.Box(0.0, 1.0, shape=(HEARING_DIM,), dtype=np.float32),
+                "touch": spaces.Box(0.0, 1.0, shape=(TOUCH_DIM,), dtype=np.float32),
+                "smell": spaces.Box(0.0, 1.0, shape=(SMELL_DIM,), dtype=np.float32),
+                "taste": spaces.Box(0.0, 1.0, shape=(TASTE_DIM,), dtype=np.float32),
+                "vitals": spaces.Box(0.0, 1.0, shape=(4,), dtype=np.float32),
+            }
+        )
         self.action_space = spaces.Discrete(N_ACTIONS)
 
         # Internal components (created on reset)
-        self._world:    Optional[PhysicsWorld]   = None
+        self._world: Optional[PhysicsWorld] = None
         self._registry: Optional[ObjectRegistry] = None
-        self._apartment: Optional[Apartment]     = None
-        self._sensors:  Optional[SensorySuite]   = None
-        self._tenant:   Optional[Tenant]         = None
+        self._apartment: Optional[Apartment] = None
+        self._sensors: Optional[SensorySuite] = None
+        self._tenant: Optional[Tenant] = None
 
         self._initialised = False
 
@@ -157,8 +168,6 @@ class TenantEnv:
 
         if not self._initialised:
             self._build(_seed)
-        else:
-            self._rebuild(_seed)
 
         obs = self._get_obs()
         return obs, {}
@@ -183,7 +192,7 @@ class TenantEnv:
 
         # Check termination
         terminated = self._evaluator.is_terminal(self._tenant)
-        truncated  = False
+        truncated = False
 
         obs = self._get_obs()
         info = {
@@ -208,7 +217,11 @@ class TenantEnv:
         if self._world is not None:
             self._world.stop()
             self._world = None
-            self._initialised = False
+        self._initialised = False
+
+    @property
+    def physics(self) -> Optional[PhysicsWorld]:
+        return self._world
 
     # ------------------------------------------------------------------
     # Internal build helpers
@@ -218,23 +231,24 @@ class TenantEnv:
         """First-time initialisation."""
         import yaml
         from pathlib import Path as _P
+
         cfg_path = str(DEFAULT_CONFIG)
         try:
             with open(cfg_path, "r", encoding="utf-8") as fh:
                 raw = yaml.safe_load(fh)
-            obs_cfg    = raw.get("observation", {})
+            obs_cfg = raw.get("observation", {})
             vitals_cfg = raw.get("vitals", {})
         except Exception:
-            obs_cfg    = {}
+            obs_cfg = {}
             vitals_cfg = {}
 
         # Physics world
         cam = CameraSpec(
-            width=obs_cfg.get("vision_width",  VISION_W),
+            width=obs_cfg.get("vision_width", VISION_W),
             height=obs_cfg.get("vision_height", VISION_H),
             fov=obs_cfg.get("vision_fov", 90.0),
         )
-        self._world    = PhysicsWorld(gui=self._gui, camera=cam)
+        self._world = PhysicsWorld(gui=self._gui, camera=cam)
         self._world.start()
 
         self._registry = ObjectRegistry()
@@ -275,12 +289,12 @@ class TenantEnv:
     def _get_obs(self) -> Dict[str, np.ndarray]:
         sensory, vitals = self._tenant.observe()
         return {
-            "vision":  sensory.vision,
+            "vision": sensory.vision,
             "hearing": sensory.hearing,
-            "touch":   sensory.touch,
-            "smell":   sensory.smell,
-            "taste":   sensory.taste,
-            "vitals":  vitals,
+            "touch": sensory.touch,
+            "smell": sensory.smell,
+            "taste": sensory.taste,
+            "vitals": vitals,
         }
 
     # ------------------------------------------------------------------

@@ -4,6 +4,7 @@ tests/test_rewards.py
 Unit tests for the reward ruleset system.
 These tests do NOT require PyBullet, Torch, or any heavy dependency.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -12,11 +13,12 @@ import pytest
 # Helpers / stubs
 # ---------------------------------------------------------------------------
 
+
 class _MockVitals:
     def __init__(self, hunger=0.2, energy=0.8, bladder=0.1, happiness=0.6):
-        self.hunger    = hunger
-        self.energy    = energy
-        self.bladder   = bladder
+        self.hunger = hunger
+        self.energy = energy
+        self.bladder = bladder
         self.happiness = happiness
 
 
@@ -26,6 +28,12 @@ class _MockRegistry:
 
     def mess_count(self):
         return self._mess
+
+    def all(self):
+        return []
+
+    def distance(self, body_id, pos):
+        return 10.0
 
 
 class _MockTenant:
@@ -44,19 +52,22 @@ class _MockTenant:
         idle_steps=0,
         total_steps=0,
     ):
-        self.vitals        = _MockVitals(hunger, energy, bladder, happiness)
-        self.events        = list(events or [])
-        self.is_sleeping   = is_sleeping
+        self.vitals = _MockVitals(hunger, energy, bladder, happiness)
+        self.events = list(events or [])
+        self.is_sleeping = is_sleeping
         self.is_watching_tv = is_watching_tv
-        self.is_reading    = is_reading
+        self.is_reading = is_reading
         self.is_playing_game = is_playing_game
-        self.idle_steps    = idle_steps
-        self.total_steps   = total_steps
-        self._mess_count   = mess_count
+        self.idle_steps = idle_steps
+        self.total_steps = total_steps
+        self._mess_count = mess_count
 
     @property
     def registry(self):
         return _MockRegistry(self._mess_count)
+
+    def get_position(self):
+        return (2.5, 2.5, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -75,27 +86,47 @@ class TestRuleParsing:
         assert not rule.per_step
 
     def test_per_step_rule(self):
-        rule = Rule({
-            "name": "hungry_penalty",
-            "per_step": True,
-            "condition": "hunger > 0.6",
-            "reward": -0.5,
-        })
+        rule = Rule(
+            {
+                "name": "hungry_penalty",
+                "per_step": True,
+                "condition": "hunger > 0.6",
+                "reward": -0.5,
+            }
+        )
         assert rule.per_step
         assert rule.condition == "hunger > 0.6"
 
     def test_condition_true(self):
         rule = Rule({"condition": "hunger > 0.6", "reward": -1.0})
-        ctx  = {"hunger": 0.8, "energy": 0.5, "bladder": 0.0, "happiness": 0.5,
-                "mess_count": 0, "idle_steps": 0, "is_sleeping": False,
-                "is_watching_tv": False, "is_reading": False, "is_playing_game": False}
+        ctx = {
+            "hunger": 0.8,
+            "energy": 0.5,
+            "bladder": 0.0,
+            "happiness": 0.5,
+            "mess_count": 0,
+            "idle_steps": 0,
+            "is_sleeping": False,
+            "is_watching_tv": False,
+            "is_reading": False,
+            "is_playing_game": False,
+        }
         assert rule.evaluate_condition(ctx) is True
 
     def test_condition_false(self):
         rule = Rule({"condition": "hunger > 0.6", "reward": -1.0})
-        ctx  = {"hunger": 0.2, "energy": 0.5, "bladder": 0.0, "happiness": 0.5,
-                "mess_count": 0, "idle_steps": 0, "is_sleeping": False,
-                "is_watching_tv": False, "is_reading": False, "is_playing_game": False}
+        ctx = {
+            "hunger": 0.2,
+            "energy": 0.5,
+            "bladder": 0.0,
+            "happiness": 0.5,
+            "mess_count": 0,
+            "idle_steps": 0,
+            "is_sleeping": False,
+            "is_watching_tv": False,
+            "is_reading": False,
+            "is_playing_game": False,
+        }
         assert rule.evaluate_condition(ctx) is False
 
     def test_no_condition_always_true(self):
@@ -118,14 +149,26 @@ class TestRuleParsing:
 
 MINIMAL_CONFIG = {
     "rules": [
-        {"name": "eat_food",       "event": "ate_food",  "reward": 10.0},
-        {"name": "pick_up_mess",   "event": "picked_up_mess", "reward": 5.0},
-        {"name": "hungry_penalty", "per_step": True,
-         "condition": "hunger > 0.6", "reward": -0.5},
-        {"name": "mess_penalty",   "per_step": True,
-         "condition": "mess_count > 0", "reward": -0.1},
-        {"name": "idle_penalty",   "per_step": True,
-         "condition": "idle_steps > 100", "reward": -0.2},
+        {"name": "eat_food", "event": "ate_food", "reward": 10.0},
+        {"name": "pick_up_mess", "event": "picked_up_mess", "reward": 5.0},
+        {
+            "name": "hungry_penalty",
+            "per_step": True,
+            "condition": "hunger > 0.6",
+            "reward": -0.5,
+        },
+        {
+            "name": "mess_penalty",
+            "per_step": True,
+            "condition": "mess_count > 0",
+            "reward": -0.1,
+        },
+        {
+            "name": "idle_penalty",
+            "per_step": True,
+            "condition": "idle_steps > 100",
+            "reward": -0.2,
+        },
     ],
     "vitals": {},
     "terminal": {
@@ -142,7 +185,7 @@ class TestRewardEvaluator:
 
     def test_eat_event_reward(self):
         ev = self._evaluator()
-        tenant   = _MockTenant(events=["ate_food"])
+        tenant = _MockTenant(events=["ate_food"])
         registry = _MockRegistry(mess_count=0)
         total, info = ev.evaluate(tenant, registry)
         assert total == pytest.approx(10.0)
@@ -150,21 +193,21 @@ class TestRewardEvaluator:
 
     def test_pick_up_mess_event(self):
         ev = self._evaluator()
-        tenant   = _MockTenant(events=["picked_up_mess"])
+        tenant = _MockTenant(events=["picked_up_mess"])
         registry = _MockRegistry(mess_count=0)
         total, info = ev.evaluate(tenant, registry)
         assert total == pytest.approx(5.0)
 
     def test_no_reward_for_idle_tenant(self):
         ev = self._evaluator()
-        tenant   = _MockTenant()
+        tenant = _MockTenant()
         registry = _MockRegistry()
         total, _ = ev.evaluate(tenant, registry)
         assert total == pytest.approx(0.0)
 
     def test_hungry_per_step_penalty(self):
         ev = self._evaluator()
-        tenant   = _MockTenant(hunger=0.8)
+        tenant = _MockTenant(hunger=0.8)
         registry = _MockRegistry()
         total, info = ev.evaluate(tenant, registry)
         assert "hungry_penalty" in info
@@ -172,7 +215,7 @@ class TestRewardEvaluator:
 
     def test_mess_per_step_penalty_scales_with_count(self):
         ev = self._evaluator()
-        tenant    = _MockTenant()
+        tenant = _MockTenant()
         registry1 = _MockRegistry(mess_count=1)
         registry3 = _MockRegistry(mess_count=3)
         _, info1 = ev.evaluate(tenant, registry1)
@@ -182,7 +225,7 @@ class TestRewardEvaluator:
 
     def test_combined_event_and_per_step(self):
         ev = self._evaluator()
-        tenant   = _MockTenant(hunger=0.8, events=["ate_food"])
+        tenant = _MockTenant(hunger=0.8, events=["ate_food"])
         registry = _MockRegistry()
         total, info = ev.evaluate(tenant, registry)
         # +10 eat, -0.5 hunger penalty
@@ -192,7 +235,7 @@ class TestRewardEvaluator:
 
     def test_idle_penalty(self):
         ev = self._evaluator()
-        tenant   = _MockTenant(idle_steps=200)
+        tenant = _MockTenant(idle_steps=200)
         registry = _MockRegistry()
         total, info = ev.evaluate(tenant, registry)
         assert "idle_penalty" in info
@@ -224,16 +267,14 @@ class TestRewardEvaluator:
 
     def test_from_yaml_loads_rules(self):
         import os
-        cfg = os.path.join(
-            os.path.dirname(__file__), "..", "config", "rewards.yaml"
-        )
+
+        cfg = os.path.join(os.path.dirname(__file__), "..", "config", "rewards.yaml")
         ev = RewardEvaluator.from_yaml(cfg)
         assert len(ev.rules) > 0
 
     def test_from_yaml_has_terminal_config(self):
         import os
-        cfg = os.path.join(
-            os.path.dirname(__file__), "..", "config", "rewards.yaml"
-        )
+
+        cfg = os.path.join(os.path.dirname(__file__), "..", "config", "rewards.yaml")
         ev = RewardEvaluator.from_yaml(cfg)
         assert ev.max_steps > 0

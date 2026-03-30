@@ -30,6 +30,7 @@ Architecture diagram
   Vitals  (4,)   ─────────────────────►│
                   └──────────────────┘
 """
+
 from __future__ import annotations
 
 from typing import Optional, Tuple
@@ -40,22 +41,28 @@ try:
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
+
     _TORCH = True
 except ImportError:
     torch = None  # type: ignore
-    nn = None     # type: ignore
-    F = None      # type: ignore
+    nn = None  # type: ignore
+    F = None  # type: ignore
     _TORCH = False
 
 from ..environment.senses import (
-    VISION_H, VISION_W, VISION_C,
-    HEARING_DIM, TOUCH_DIM, SMELL_DIM, TASTE_DIM,
+    VISION_H,
+    VISION_W,
+    VISION_C,
+    HEARING_DIM,
+    TOUCH_DIM,
+    SMELL_DIM,
+    TASTE_DIM,
 )
 from ..tenant.actions import N_ACTIONS
 
-VITALS_DIM  = 4       # hunger, energy, bladder, happiness
-HIDDEN_DIM  = 256     # LSTM hidden size
-CNN_OUT_DIM = 256     # flattened CNN output
+VITALS_DIM = 4  # hunger, energy, bladder, happiness
+HIDDEN_DIM = 1024  # LSTM hidden size (significantly increased from 512)
+CNN_OUT_DIM = 1024  # flattened CNN output (significantly increased from 512)
 
 
 def _require_torch() -> None:
@@ -71,24 +78,27 @@ def _require_torch() -> None:
 # ---------------------------------------------------------------------------
 
 if _TORCH:
+
     class VisualEncoder(nn.Module):
         """
-        Small convolutional network that encodes (C, H, W) RGB images into a
+        Convolutional network that encodes (C, H, W) RGB images into a
         fixed-size feature vector.
 
         Architecture:
-          Conv(3→32, k=8, s=4) → Conv(32→64, k=4, s=2) → Conv(64→64, k=3, s=1)
-          → Flatten → Linear(→256) → ReLU
+          Conv(3→128, k=8, s=4) → Conv(128→256, k=4, s=2) → Conv(256→256, k=3, s=1)
+          → Flatten → Linear(→1024) → ReLU
         """
 
-        def __init__(self, in_channels: int = VISION_C, out_dim: int = CNN_OUT_DIM) -> None:
+        def __init__(
+            self, in_channels: int = VISION_C, out_dim: int = CNN_OUT_DIM
+        ) -> None:
             super().__init__()
             self.conv = nn.Sequential(
-                nn.Conv2d(in_channels, 32, kernel_size=8, stride=4),
+                nn.Conv2d(in_channels, 128, kernel_size=8, stride=4),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(32, 64, kernel_size=4, stride=2),
+                nn.Conv2d(128, 256, kernel_size=4, stride=2),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(64, 64, kernel_size=3, stride=1),
+                nn.Conv2d(256, 256, kernel_size=3, stride=1),
                 nn.ReLU(inplace=True),
             )
             # Compute flattened size dynamically
@@ -105,7 +115,6 @@ if _TORCH:
         def forward(self, x: "torch.Tensor") -> "torch.Tensor":
             return self.fc(self.conv(x))
 
-
     # ---------------------------------------------------------------------------
     # Non-visual sense encoder
     # ---------------------------------------------------------------------------
@@ -117,20 +126,21 @@ if _TORCH:
         Input: [hearing | touch | smell | taste | vitals]
         """
 
-        def __init__(self, out_dim: int = 64) -> None:
+        def __init__(self, out_dim: int = 256) -> None:
             in_dim = HEARING_DIM + TOUCH_DIM + SMELL_DIM + TASTE_DIM + VITALS_DIM
             super().__init__()
             self.net = nn.Sequential(
-                nn.Linear(in_dim, 128),
+                nn.Linear(in_dim, 512),
                 nn.ReLU(inplace=True),
-                nn.Linear(128, out_dim),
+                nn.Linear(512, 256),
+                nn.ReLU(inplace=True),
+                nn.Linear(256, out_dim),
                 nn.ReLU(inplace=True),
             )
             self.out_dim = out_dim
 
         def forward(self, x: "torch.Tensor") -> "torch.Tensor":
             return self.net(x)
-
 
     # ---------------------------------------------------------------------------
     # Attention gate (neuroplasticity module)
@@ -153,7 +163,6 @@ if _TORCH:
 
         def forward(self, x: "torch.Tensor") -> "torch.Tensor":
             return x * self.gate(x)
-
 
     # ---------------------------------------------------------------------------
     # Main TenantNetwork (Actor-Critic with LSTM)
@@ -179,11 +188,9 @@ if _TORCH:
 
             self.n_actions = n_actions
 
-            # --- Encoders ---
-            self.visual_enc   = VisualEncoder()
-            self.sensory_enc  = SensoryEncoder(out_dim=64)
+            self.visual_enc = VisualEncoder()
+            self.sensory_enc = SensoryEncoder(out_dim=256)
 
-            # Fusion layer
             fusion_in = self.visual_enc.out_dim + self.sensory_enc.out_dim
             self.fusion = nn.Sequential(
                 nn.Linear(fusion_in, lstm_hidden),
@@ -191,27 +198,28 @@ if _TORCH:
                 nn.ReLU(inplace=True),
             )
 
-            # Neuroplasticity: attention gate on fused features
             self.attention = AttentionGate(lstm_hidden)
 
-            # Temporal memory (LSTM)
             self.lstm = nn.LSTMCell(lstm_hidden, lstm_hidden)
 
-            # Dropout for sparse activations (pruning analogue)
+            self.temporal_fusion = nn.Sequential(
+                nn.Linear(lstm_hidden, lstm_hidden),
+                nn.LayerNorm(lstm_hidden),
+                nn.ReLU(inplace=True),
+                nn.Dropout(0.1),
+            )
+
             self.dropout = nn.Dropout(p=0.1)
 
-            # --- Output heads ---
-            # Actor: produces action logits
             self.actor = nn.Sequential(
-                nn.Linear(lstm_hidden, 128),
+                nn.Linear(lstm_hidden, 512),
                 nn.ReLU(inplace=True),
-                nn.Linear(128, n_actions),
+                nn.Linear(512, n_actions),
             )
-            # Critic: produces value estimate
             self.critic = nn.Sequential(
-                nn.Linear(lstm_hidden, 128),
+                nn.Linear(lstm_hidden, 512),
                 nn.ReLU(inplace=True),
-                nn.Linear(128, 1),
+                nn.Linear(512, 1),
             )
 
             self._lstm_hidden = lstm_hidden
@@ -226,9 +234,12 @@ if _TORCH:
                     nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
                     if m.bias is not None:
                         nn.init.constant_(m.bias, 0.0)
-            # Actor output head: smaller init for better exploration
+                elif isinstance(m, nn.LSTMCell):
+                    nn.init.orthogonal_(m.weight_ih, gain=np.sqrt(2))
+                    nn.init.orthogonal_(m.weight_hh, gain=np.sqrt(2))
+                    nn.init.constant_(m.bias_ih, 0.0)
+                    nn.init.constant_(m.bias_hh, 0.0)
             nn.init.orthogonal_(self.actor[-1].weight, gain=0.01)
-            # Critic output: slightly larger
             nn.init.orthogonal_(self.critic[-1].weight, gain=1.0)
 
         def get_initial_state(
@@ -245,7 +256,9 @@ if _TORCH:
             vision: "torch.Tensor",
             non_visual: "torch.Tensor",
             lstm_state: Optional[Tuple["torch.Tensor", "torch.Tensor"]] = None,
-        ) -> Tuple["torch.Tensor", "torch.Tensor", Tuple["torch.Tensor", "torch.Tensor"]]:
+        ) -> Tuple[
+            "torch.Tensor", "torch.Tensor", Tuple["torch.Tensor", "torch.Tensor"]
+        ]:
             """
             Parameters
             ----------
@@ -264,23 +277,27 @@ if _TORCH:
             if lstm_state is None:
                 lstm_state = self.get_initial_state(B, device=vision.device)
 
-            # Encode each modality
-            vis_feat    = self.visual_enc(vision)           # (B, 256)
-            sense_feat  = self.sensory_enc(non_visual)      # (B, 64)
+            vis_feat = self.visual_enc(vision)
+            sense_feat = self.sensory_enc(non_visual)
 
-            # Fuse
-            fused = self.fusion(torch.cat([vis_feat, sense_feat], dim=1))  # (B, 256)
+            fused = self.fusion(torch.cat([vis_feat, sense_feat], dim=1))
 
-            # Neuroplastic attention gate
-            attended = self.attention(fused)                # (B, 256)
+            attended = self.attention(fused)
 
-            # LSTM temporal integration
-            hx, cx = self.lstm(attended, lstm_state)        # (B, 256)
+            hx, cx = self.lstm(attended, lstm_state)
+            hx = self.temporal_fusion(hx)
             hx = self.dropout(hx)
 
-            # Actor / Critic
-            action_logits = self.actor(hx)                  # (B, n_actions)
-            value         = self.critic(hx)                 # (B, 1)
+            action_logits = self.actor(hx)
+            value = self.critic(hx)
+
+            action_logits = torch.clamp(action_logits, min=-50, max=50)
+            value = torch.clamp(value, min=-1000, max=1000)
+
+            if torch.isnan(action_logits).any() or torch.isinf(action_logits).any():
+                action_logits = torch.zeros_like(action_logits)
+            if torch.isnan(value).any() or torch.isinf(value).any():
+                value = torch.zeros_like(value)
 
             return action_logits, value, (hx, cx)
 
@@ -290,8 +307,9 @@ if _TORCH:
             non_visual: "torch.Tensor",
             lstm_state: Optional[Tuple["torch.Tensor", "torch.Tensor"]] = None,
             deterministic: bool = False,
-        ) -> Tuple[int, "torch.Tensor", "torch.Tensor",
-                   Tuple["torch.Tensor", "torch.Tensor"]]:
+        ) -> Tuple[
+            int, "torch.Tensor", "torch.Tensor", Tuple["torch.Tensor", "torch.Tensor"]
+        ]:
             """
             Sample (or take best) action.
 
@@ -322,17 +340,17 @@ if _TORCH:
             logits, value, _ = self.forward(vision, non_visual, lstm_state)
             dist = torch.distributions.Categorical(logits=logits)
             log_probs = dist.log_prob(actions)
-            entropy   = dist.entropy()
+            entropy = dist.entropy()
             return log_probs, value, entropy
 
 
 else:
-    # Stub classes when torch is not installed (for tests / CI)
+
     class VisualEncoder:  # type: ignore[no-redef]
         out_dim = CNN_OUT_DIM
 
     class SensoryEncoder:  # type: ignore[no-redef]
-        out_dim = 64
+        out_dim = 128
 
     class AttentionGate:  # type: ignore[no-redef]
         pass

@@ -26,6 +26,7 @@ Features
 
 The viewer runs the simulation in its own loop at up to *target_fps* Hz.
 """
+
 from __future__ import annotations
 
 import math
@@ -37,6 +38,7 @@ import numpy as np
 
 try:
     import pygame
+
     _PG = True
 except ImportError:
     _PG = False
@@ -45,46 +47,50 @@ from ..sim_env import TenantEnv
 from ..tenant.actions import Action, ACTION_LABELS, N_ACTIONS
 
 # Window layout
-WIN_W  = 1280
-WIN_H  = 720
-VIEW_W = 640   # first-person view width
-VIEW_H = 480   # first-person view height
-MAP_W  = 300
-MAP_H  = 300
-PANEL_X = 660  # right panel x offset
+WIN_W = 1280
+WIN_H = 720
+VIEW_W = 640
+VIEW_H = 480
+MAP_W = 300
+MAP_H = 300
+PANEL_X = 660
 
 # Colour palette
-BG_COLOR       = (20,  20,  30)
-TEXT_COLOR     = (220, 220, 220)
-ACCENT_COLOR   = (80,  160, 255)
-WARN_COLOR     = (255, 180,  60)
-DANGER_COLOR   = (220,  60,  60)
-GOOD_COLOR     = (80,  200, 120)
-GRAPH_COLOR    = (100, 160, 255)
-GRID_COLOR     = (50,  50,  70)
-OVERLAY_BG     = (0,   0,   0, 160)
+BG_COLOR = (20, 20, 30)
+TEXT_COLOR = (220, 220, 220)
+ACCENT_COLOR = (80, 160, 255)
+WARN_COLOR = (255, 180, 60)
+DANGER_COLOR = (220, 60, 60)
+GOOD_COLOR = (80, 200, 120)
+GRAPH_COLOR = (100, 160, 255)
+GRID_COLOR = (50, 50, 70)
+OVERLAY_BG = (0, 0, 0, 160)
 
 VITAL_COLORS = {
-    "hunger":    DANGER_COLOR,
-    "energy":    GOOD_COLOR,
-    "bladder":   WARN_COLOR,
+    "hunger": DANGER_COLOR,
+    "energy": GOOD_COLOR,
+    "bladder": WARN_COLOR,
     "happiness": ACCENT_COLOR,
 }
 
-MANUAL_ACTION_MAP = {
-    pygame.K_UP:    Action.MOVE_FORWARD   if _PG else 1,
-    pygame.K_DOWN:  Action.MOVE_BACKWARD  if _PG else 2,
-    pygame.K_LEFT:  Action.MOVE_LEFT      if _PG else 3,
-    pygame.K_RIGHT: Action.MOVE_RIGHT     if _PG else 4,
-    pygame.K_a:     Action.TURN_LEFT      if _PG else 5,
-    pygame.K_d:     Action.TURN_RIGHT     if _PG else 6,
-    pygame.K_f:     Action.PICK_UP        if _PG else 7,
-    pygame.K_g:     Action.PUT_DOWN       if _PG else 8,
-    pygame.K_e:     Action.INTERACT       if _PG else 9,
-    pygame.K_t:     Action.EAT            if _PG else 10,
-    pygame.K_s:     Action.SLEEP          if _PG else 11,
-    pygame.K_b:     Action.USE_BATHROOM   if _PG else 12,
-} if _PG else {}
+MANUAL_ACTION_MAP = (
+    {
+        pygame.K_UP: Action.MOVE_FORWARD if _PG else 1,
+        pygame.K_DOWN: Action.MOVE_BACKWARD if _PG else 2,
+        pygame.K_LEFT: Action.MOVE_LEFT if _PG else 3,
+        pygame.K_RIGHT: Action.MOVE_RIGHT if _PG else 4,
+        pygame.K_a: Action.TURN_LEFT if _PG else 5,
+        pygame.K_d: Action.TURN_RIGHT if _PG else 6,
+        pygame.K_f: Action.PICK_UP if _PG else 7,
+        pygame.K_g: Action.PUT_DOWN if _PG else 8,
+        pygame.K_e: Action.INTERACT if _PG else 9,
+        pygame.K_t: Action.EAT if _PG else 10,
+        pygame.K_s: Action.SLEEP if _PG else 11,
+        pygame.K_b: Action.USE_BATHROOM if _PG else 12,
+    }
+    if _PG
+    else {}
+)
 
 
 def _require_pygame() -> None:
@@ -115,30 +121,31 @@ class SimViewer:
         target_fps: int = 30,
     ) -> None:
         _require_pygame()
-        self.env            = env
-        self.nn_agent       = nn_agent
+        self.env = env
+        self.nn_agent = nn_agent
         self.online_learner = online_learner
-        self.target_fps     = target_fps
+        self.target_fps = target_fps
 
         # Online learner takes precedence over legacy nn_agent
         self._has_nn = (online_learner is not None) or (nn_agent is not None)
 
-        self._paused        = False
-        self._manual_mode   = not self._has_nn
+        self._paused = False
+        self._manual_mode = not self._has_nn
         self._manual_action = Action.IDLE
-        self._running       = True
+        self._running = True
+        self._continuous_mode = False
 
-        self._total_reward   = 0.0
-        self._step_reward    = 0.0
-        self._episode_step   = 0
-        self._episode_count  = 0
+        self._total_reward = 0.0
+        self._step_reward = 0.0
+        self._episode_step = 0
+        self._episode_count = 0
         self._reward_history: deque = deque(maxlen=200)
-        self._action_label   = ACTION_LABELS[Action.IDLE]
+        self._action_label = ACTION_LABELS[Action.IDLE]
         self._last_info: dict = {}
 
         # Learning status (updated by OnlineLearner on every step)
-        self._update_count: int   = 0
-        self._last_loss:    float = 0.0
+        self._update_count: int = 0
+        self._last_loss: float = 0.0
 
         pygame.init()
         self._screen = pygame.display.set_mode((WIN_W, WIN_H))
@@ -195,10 +202,10 @@ class SimViewer:
             # --- Step environment ---
             next_obs, reward, terminated, truncated, info = self.env.step(int(action))
             done = terminated or truncated
-            self._step_reward    = reward
-            self._total_reward  += reward
-            self._episode_step  += 1
-            self._last_info      = info
+            self._step_reward = reward
+            self._total_reward += reward
+            self._episode_step += 1
+            self._last_info = info
             self._reward_history.append(reward)
 
             # Online learning: immediate per-step gradient update.
@@ -209,21 +216,29 @@ class SimViewer:
                 if stats:
                     # Every observe() returns stats — update HUD counters.
                     self._update_count = self.online_learner.update_count
-                    self._last_loss    = self.online_learner.last_loss
+                    self._last_loss = self.online_learner.last_loss
 
             # Advance observation for the next iteration.
             obs = next_obs
 
             if done:
-                self._episode_count += 1
-                self._total_reward   = 0.0
-                self._episode_step   = 0
-                obs, _ = self.env.reset()
-                lstm_state = None
-                # OnlineLearner resets its own LSTM inside observe(done=True).
-                # Reset legacy nn_agent if it exposes a reset_lstm() method.
-                if self.nn_agent is not None and hasattr(self.nn_agent, "reset_lstm"):
-                    self.nn_agent.reset_lstm()
+                if self._continuous_mode:
+                    self._episode_count += 1
+                    obs, _ = self.env.reset()
+                    obs = self._continuize_vitals(obs)
+                    lstm_state = None
+                    if self.online_learner is not None:
+                        self.online_learner.reset_lstm()
+                else:
+                    self._episode_count += 1
+                    self._total_reward = 0.0
+                    self._episode_step = 0
+                    obs, _ = self.env.reset()
+                    lstm_state = None
+                    if self.nn_agent is not None and hasattr(
+                        self.nn_agent, "reset_lstm"
+                    ):
+                        self.nn_agent.reset_lstm()
 
             # --- Render ---
             self._render(obs)
@@ -243,6 +258,17 @@ class SimViewer:
         except Exception:
             return Action.IDLE
 
+    def _continuize_vitals(self, obs: dict) -> dict:
+        if obs is None:
+            return obs
+        vitals = obs.get("vitals")
+        if vitals is not None:
+            vitals[0] = 0.3
+            vitals[1] = 0.7
+            vitals[2] = 0.3
+            vitals[3] = 0.5
+        return obs
+
     def _handle_keydown(self, key: int) -> None:
         if key in (pygame.K_q, pygame.K_ESCAPE):
             self._running = False
@@ -250,14 +276,17 @@ class SimViewer:
             self._paused = not self._paused
         elif key == pygame.K_r:
             self.env.reset()
-            self._total_reward  = 0.0
-            self._episode_step  = 0
+            self._total_reward = 0.0
+            self._episode_step = 0
             if self.online_learner is not None:
                 self.online_learner.reset_lstm()
         elif key == pygame.K_i:
             self._manual_mode = not self._manual_mode
             mode = "Manual" if self._manual_mode else "NN (online learning)"
             print(f"[Viewer] Switched to {mode} control")
+        elif key == pygame.K_c:
+            self._continuous_mode = not self._continuous_mode
+            print(f"[Viewer] Continuous mode: {self._continuous_mode}")
         else:
             for k, a in MANUAL_ACTION_MAP.items():
                 if key == k:
@@ -359,18 +388,20 @@ class SimViewer:
         """Draw vital bars below the minimap."""
         vitals_arr = obs.get("vitals", np.zeros(4, dtype=np.float32))
         labels = ["Hunger", "Energy", "Bladder", "Happiness"]
-        colors  = [DANGER_COLOR, GOOD_COLOR, WARN_COLOR, ACCENT_COLOR]
+        colors = [DANGER_COLOR, GOOD_COLOR, WARN_COLOR, ACCENT_COLOR]
 
         bar_x = PANEL_X
         bar_y = MAP_H + 40
         bar_w = MAP_W
         bar_h = 18
-        gap   = 28
+        gap = 28
 
         for i, (label, color, val) in enumerate(zip(labels, colors, vitals_arr)):
             y = bar_y + i * gap
             # Background
-            pygame.draw.rect(self._screen, (40, 40, 60), (bar_x, y, bar_w, bar_h), border_radius=4)
+            pygame.draw.rect(
+                self._screen, (40, 40, 60), (bar_x, y, bar_w, bar_h), border_radius=4
+            )
             # Fill – hunger & bladder: high is bad; energy & happiness: high is good
             if label in ("Hunger", "Bladder"):
                 fill_frac = float(val)
@@ -381,8 +412,7 @@ class SimViewer:
             fill_w = max(0, int(bar_w * fill_frac))
             if fill_w > 0:
                 pygame.draw.rect(
-                    self._screen, fill_color,
-                    (bar_x, y, fill_w, bar_h), border_radius=4
+                    self._screen, fill_color, (bar_x, y, fill_w, bar_h), border_radius=4
                 )
             # Label + value
             text = self._font_xs.render(f"{label}: {val:.2f}", True, TEXT_COLOR)
@@ -434,10 +464,11 @@ class SimViewer:
 
         # Controls hint
         hint_y = WIN_H - 110
+        continuous_str = "ON" if self._continuous_mode else "OFF"
         hints = [
-            "SPACE=Pause  R=Reset  I=Toggle NN/Manual  Q=Quit",
+            f"SPACE=Pause  R=Reset  C=Continuous ({continuous_str})  Q=Quit",
             "↑↓←→=Move  A/D=Turn  E=Interact  F=Pick  G=Drop",
-            "T=Eat  S=Sleep  B=Bathroom",
+            "T=Eat  S=Sleep  B=Bathroom  I=Toggle NN/Manual",
         ]
         for i, h in enumerate(hints):
             s = self._font_xs.render(h, True, (150, 150, 180))
@@ -450,16 +481,19 @@ class SimViewer:
 
         graph_x, graph_y = 10, VIEW_H + 40
         graph_w, graph_h = VIEW_W, 120
-        pygame.draw.rect(self._screen, (25, 25, 40), (graph_x, graph_y, graph_w, graph_h))
-        pygame.draw.rect(self._screen, ACCENT_COLOR,  (graph_x, graph_y, graph_w, graph_h), 1)
+        pygame.draw.rect(
+            self._screen, (25, 25, 40), (graph_x, graph_y, graph_w, graph_h)
+        )
+        pygame.draw.rect(
+            self._screen, ACCENT_COLOR, (graph_x, graph_y, graph_w, graph_h), 1
+        )
 
         data = list(self._reward_history)
         max_v = max(abs(v) for v in data) + 1e-8
         zero_y = graph_y + graph_h // 2
 
         pygame.draw.line(
-            self._screen, GRID_COLOR,
-            (graph_x, zero_y), (graph_x + graph_w, zero_y), 1
+            self._screen, GRID_COLOR, (graph_x, zero_y), (graph_x + graph_w, zero_y), 1
         )
 
         pts = []
@@ -479,6 +513,7 @@ class SimViewer:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _lerp_color(c1, c2, t: float):
     t = max(0.0, min(1.0, t))
