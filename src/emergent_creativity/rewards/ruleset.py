@@ -249,6 +249,8 @@ class RewardEvaluator:
             "near_book": 0.0,
             "near_game": 0.0,
         }
+        self._registry_version: int = -1
+        self._relevant_objects: List[Any] = []
         self._prev_vitals: Optional[Dict[str, float]] = None
         self._reward_history: List[float] = []
         self._running_mean: float = 0.0
@@ -314,7 +316,18 @@ class RewardEvaluator:
         if registry is None:
             return result
 
-        for obj in registry.all():
+        current_version = getattr(registry, "_version", -1)
+        if current_version != self._registry_version:
+            self._registry_version = current_version
+            self._relevant_objects = [
+                obj
+                for obj in registry.all()
+                if obj.name in ("fridge", "stove", "apple", "pizza", "water_bottle", "bed", "toilet", "tv")
+                or "book" in obj.name
+                or "game" in obj.name
+            ]
+
+        for obj in self._relevant_objects:
             dist = registry.distance(obj.body_id, pos)
             if dist > 3.0:
                 continue
