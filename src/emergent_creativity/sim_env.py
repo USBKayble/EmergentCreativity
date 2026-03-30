@@ -230,7 +230,6 @@ class TenantEnv:
     def _build(self, seed: int) -> None:
         """First-time initialisation."""
         import yaml
-        from pathlib import Path as _P
 
         cfg_path = str(DEFAULT_CONFIG)
         try:
