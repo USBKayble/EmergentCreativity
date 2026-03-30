@@ -133,6 +133,10 @@ class OnlineLearner:
         self._last_loss: float = 0.0
         self._last_stats: Dict = {}
 
+        self._pending_log_prob = None
+        self._pending_value = None
+        self._pending_entropy = None
+
         print(
             f"[OnlineLearner] Initialised on {self.device}. "
             f"Gradient update on every environment step."
