@@ -24,7 +24,6 @@ Pickable objects (food, books, mess) are dynamic.
 
 from __future__ import annotations
 
-import math
 import random
 from typing import Dict, List, Optional, Tuple
 
