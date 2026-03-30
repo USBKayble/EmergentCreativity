@@ -61,6 +61,61 @@ import numpy as np
 ROOM_W = 5.0
 ROOM_D = 5.0
 
+# Supported operators mapping
+_OPERATORS = {
+    ast.Add: _op.add,
+    ast.Sub: _op.sub,
+    ast.Mult: _op.mul,
+    ast.Div: _op.truediv,
+    ast.Eq: _op.eq,
+    ast.NotEq: _op.ne,
+    ast.Lt: _op.lt,
+    ast.LtE: _op.le,
+    ast.Gt: _op.gt,
+    ast.GtE: _op.ge,
+    ast.And: lambda a, b: a and b,
+    ast.Or: lambda a, b: a or b,
+    ast.Not: _op.not_,
+}
+
+def _eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
+    """Safely evaluate an AST node using the provided context."""
+    if isinstance(node, ast.Expression):
+        return _eval_ast(node.body, ctx)
+    elif isinstance(node, ast.Constant):
+        return node.value
+    elif isinstance(node, ast.Name):
+        if node.id not in ctx:
+            raise NameError(f"name '{node.id}' is not defined")
+        return ctx[node.id]
+    elif isinstance(node, ast.UnaryOp):
+        operand = _eval_ast(node.operand, ctx)
+        return _OPERATORS[type(node.op)](operand)
+    elif isinstance(node, ast.BinOp):
+        left = _eval_ast(node.left, ctx)
+        right = _eval_ast(node.right, ctx)
+        return _OPERATORS[type(node.op)](left, right)
+    elif isinstance(node, ast.Compare):
+        left = _eval_ast(node.left, ctx)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _eval_ast(comparator, ctx)
+            if not _OPERATORS[type(op)](left, right):
+                return False
+            left = right
+        return True
+    elif isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            for value in node.values:
+                if not _eval_ast(value, ctx):
+                    return False
+            return True
+        elif isinstance(node.op, ast.Or):
+            for value in node.values:
+                if _eval_ast(value, ctx):
+                    return True
+            return False
+    raise ValueError(f"Unsupported AST node type: {type(node)}")
+
 
 # Default config path (relative to project root)
 DEFAULT_CONFIG = Path(__file__).parents[3] / "config" / "rewards.yaml"
@@ -91,14 +146,14 @@ _ALLOWED_NODES = (
 )
 
 
-def _compile_condition(expr: str) -> Optional[Tuple[CodeType, Set[str]]]:
+def _compile_condition(expr: str) -> Optional[Tuple[ast.AST, Set[str]]]:
     """
     Parse and compile a simple boolean condition safely.
 
     Only allows comparisons, boolean logic, numeric literals, and variable references.
     No function calls, imports, or attribute access are permitted.
 
-    Returns a tuple of (compiled_code, required_variable_names), or None if parsing fails.
+    Returns a tuple of (parsed_ast, required_variable_names), or None if parsing fails.
     """
     try:
         tree = ast.parse(expr, mode="eval")
@@ -112,12 +167,7 @@ def _compile_condition(expr: str) -> Optional[Tuple[CodeType, Set[str]]]:
 
     required_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
 
-    # Compile the AST to a code object
-    try:
-        compiled_code = compile(tree, "<condition>", "eval")
-        return compiled_code, required_names
-    except Exception:
-        return None
+    return tree, required_names
 
 
 # ---------------------------------------------------------------------------
@@ -161,9 +211,7 @@ class Rule:
             return False
 
         try:
-            return bool(
-                eval(self._compiled_condition, {"__builtins__": {}}, ctx)
-            )  # noqa: S307
+            return bool(_eval_ast(self._compiled_condition, ctx))
         except Exception:
             return False
 
