@@ -338,7 +338,7 @@ class OnlineLearner:
 
     def load(self, path: str) -> None:
         """Load model + optimiser state from *path*."""
-        ck = torch.load(path, map_location=self.device)
+        ck = torch.load(path, map_location=self.device, weights_only=True)
         self.net.load_state_dict(ck["model"])
         self.optimizer.load_state_dict(ck["optimizer"])
         self._step_count = ck.get("step", 0)

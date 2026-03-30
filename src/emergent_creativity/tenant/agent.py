@@ -28,7 +28,6 @@ from ..environment.physics_world import PhysicsWorld
 from ..environment.senses import SensorySuite, SensoryObservation
 from .actions import (
     Action,
-    MOVE_SPEED,
     TURN_SPEED_DEG,
     REACH_DISTANCE,
     SLEEP_DISTANCE,
@@ -235,6 +234,9 @@ class Tenant:
         Execute one action and update internal state.
         Emits events into self.events.
         """
+        if self._body_id < 0:
+            return
+
         self.total_steps += 1
         self.events.clear()
 
