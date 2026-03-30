@@ -22,8 +22,6 @@ All furniture is created as static boxes (mass=0).
 Pickable objects (food, books, mess) are dynamic.
 """
 
-from __future__ import annotations
-
 import math
 import random
 from typing import List, Optional, Tuple
