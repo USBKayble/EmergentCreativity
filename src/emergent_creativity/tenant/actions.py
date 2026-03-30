@@ -24,7 +24,6 @@ The tenant has 13 discrete actions (0–12):
 All movement is applied via velocity impulse so that the physics engine
 handles collisions naturally.
 """
-from __future__ import annotations
 
 from enum import IntEnum
 
