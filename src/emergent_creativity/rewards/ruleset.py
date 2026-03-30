@@ -49,7 +49,8 @@ import ast
 import operator as _op
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from types import CodeType
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -59,6 +60,61 @@ import numpy as np
 # Room boundaries (matching apartment.py)
 ROOM_W = 5.0
 ROOM_D = 5.0
+
+# Supported operators mapping
+_OPERATORS = {
+    ast.Add: _op.add,
+    ast.Sub: _op.sub,
+    ast.Mult: _op.mul,
+    ast.Div: _op.truediv,
+    ast.Eq: _op.eq,
+    ast.NotEq: _op.ne,
+    ast.Lt: _op.lt,
+    ast.LtE: _op.le,
+    ast.Gt: _op.gt,
+    ast.GtE: _op.ge,
+    ast.And: lambda a, b: a and b,
+    ast.Or: lambda a, b: a or b,
+    ast.Not: _op.not_,
+}
+
+def _eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
+    """Safely evaluate an AST node using the provided context."""
+    if isinstance(node, ast.Expression):
+        return _eval_ast(node.body, ctx)
+    elif isinstance(node, ast.Constant):
+        return node.value
+    elif isinstance(node, ast.Name):
+        if node.id not in ctx:
+            raise NameError(f"name '{node.id}' is not defined")
+        return ctx[node.id]
+    elif isinstance(node, ast.UnaryOp):
+        operand = _eval_ast(node.operand, ctx)
+        return _OPERATORS[type(node.op)](operand)
+    elif isinstance(node, ast.BinOp):
+        left = _eval_ast(node.left, ctx)
+        right = _eval_ast(node.right, ctx)
+        return _OPERATORS[type(node.op)](left, right)
+    elif isinstance(node, ast.Compare):
+        left = _eval_ast(node.left, ctx)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _eval_ast(comparator, ctx)
+            if not _OPERATORS[type(op)](left, right):
+                return False
+            left = right
+        return True
+    elif isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            for value in node.values:
+                if not _eval_ast(value, ctx):
+                    return False
+            return True
+        elif isinstance(node.op, ast.Or):
+            for value in node.values:
+                if _eval_ast(value, ctx):
+                    return True
+            return False
+    raise ValueError(f"Unsupported AST node type: {type(node)}")
 
 
 # Default config path (relative to project root)
@@ -90,35 +146,28 @@ _ALLOWED_NODES = (
 )
 
 
-def _safe_eval_condition(expr: str, ctx: Dict[str, Any]) -> bool:
+def _compile_condition(expr: str) -> Optional[Tuple[ast.AST, Set[str]]]:
     """
-    Parse and evaluate a simple boolean condition safely.
+    Parse and compile a simple boolean condition safely.
 
-    Only allows comparisons, boolean logic, numeric literals, and references
-    to variables present in *ctx*.  No function calls, imports, or attribute
-    access are permitted.
+    Only allows comparisons, boolean logic, numeric literals, and variable references.
+    No function calls, imports, or attribute access are permitted.
 
-    Returns False if parsing or evaluation fails.
+    Returns a tuple of (parsed_ast, required_variable_names), or None if parsing fails.
     """
     try:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError:
-        return False
+        return None
 
     # Walk the AST and reject any disallowed node types
     for node in ast.walk(tree):
         if not isinstance(node, _ALLOWED_NODES):
-            return False
-        if isinstance(node, ast.Name) and node.id not in ctx:
-            return False
+            return None
 
-    # Safe to evaluate with a restricted namespace
-    try:
-        return bool(
-            eval(compile(tree, "<condition>", "eval"), {"__builtins__": {}}, ctx)
-        )  # noqa: S307
-    except Exception:
-        return False
+    required_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+
+    return tree, required_names
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +185,13 @@ class Rule:
         self.condition: str = data.get("condition", "")
         self.reward: float = float(data.get("reward", 0.0))
 
+        self._compiled_condition = None
+        self._required_names = set()
+        if self.condition:
+            compiled_info = _compile_condition(self.condition)
+            if compiled_info:
+                self._compiled_condition, self._required_names = compiled_info
+
     def matches_event(self, event: str) -> bool:
         return bool(self.event) and self.event == event
 
@@ -146,7 +202,18 @@ class Rule:
         """
         if not self.condition:
             return True
-        return _safe_eval_condition(self.condition, ctx)
+
+        if not self._compiled_condition:
+            return False
+
+        # Ensure all required variables are present in the context
+        if not self._required_names.issubset(ctx.keys()):
+            return False
+
+        try:
+            return bool(_eval_ast(self._compiled_condition, ctx))
+        except Exception:
+            return False
 
 
 # ---------------------------------------------------------------------------
