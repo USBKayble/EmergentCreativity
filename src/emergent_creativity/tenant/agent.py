@@ -17,7 +17,7 @@ Events are plain strings stored in a list that is drained each step by
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
