@@ -49,7 +49,8 @@ import ast
 import operator as _op
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from types import CodeType
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -90,35 +91,33 @@ _ALLOWED_NODES = (
 )
 
 
-def _safe_eval_condition(expr: str, ctx: Dict[str, Any]) -> bool:
+def _compile_condition(expr: str) -> Optional[Tuple[CodeType, Set[str]]]:
     """
-    Parse and evaluate a simple boolean condition safely.
+    Parse and compile a simple boolean condition safely.
 
-    Only allows comparisons, boolean logic, numeric literals, and references
-    to variables present in *ctx*.  No function calls, imports, or attribute
-    access are permitted.
+    Only allows comparisons, boolean logic, numeric literals, and variable references.
+    No function calls, imports, or attribute access are permitted.
 
-    Returns False if parsing or evaluation fails.
+    Returns a tuple of (compiled_code, required_variable_names), or None if parsing fails.
     """
     try:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError:
-        return False
+        return None
 
     # Walk the AST and reject any disallowed node types
     for node in ast.walk(tree):
         if not isinstance(node, _ALLOWED_NODES):
-            return False
-        if isinstance(node, ast.Name) and node.id not in ctx:
-            return False
+            return None
 
-    # Safe to evaluate with a restricted namespace
+    required_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+
+    # Compile the AST to a code object
     try:
-        return bool(
-            eval(compile(tree, "<condition>", "eval"), {"__builtins__": {}}, ctx)
-        )  # noqa: S307
+        compiled_code = compile(tree, "<condition>", "eval")
+        return compiled_code, required_names
     except Exception:
-        return False
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +135,13 @@ class Rule:
         self.condition: str = data.get("condition", "")
         self.reward: float = float(data.get("reward", 0.0))
 
+        self._compiled_condition = None
+        self._required_names = set()
+        if self.condition:
+            compiled_info = _compile_condition(self.condition)
+            if compiled_info:
+                self._compiled_condition, self._required_names = compiled_info
+
     def matches_event(self, event: str) -> bool:
         return bool(self.event) and self.event == event
 
@@ -146,7 +152,20 @@ class Rule:
         """
         if not self.condition:
             return True
-        return _safe_eval_condition(self.condition, ctx)
+
+        if not self._compiled_condition:
+            return False
+
+        # Ensure all required variables are present in the context
+        if not self._required_names.issubset(ctx.keys()):
+            return False
+
+        try:
+            return bool(
+                eval(self._compiled_condition, {"__builtins__": {}}, ctx)
+            )  # noqa: S307
+        except Exception:
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -686,6 +705,17 @@ class RewardEvaluator:
 
     def is_terminal(self, tenant: Any) -> bool:
         """Return True when the episode should end."""
+        hunger_max = float(self.terminal.get("hunger_max", 1.0))
+        energy_min = float(self.terminal.get("energy_min", 0.0))
+        max_steps = int(self.terminal.get("max_steps", 50000))
+
+        if tenant.vitals.hunger >= hunger_max:
+            return True
+        if tenant.vitals.energy <= energy_min:
+            return True
+        if getattr(tenant, "total_steps", 0) >= max_steps:
+            return True
+
         return False
 
     @property
