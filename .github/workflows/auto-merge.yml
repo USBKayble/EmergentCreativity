@@ -75,4 +75,33 @@ jobs:
                 pullRequestId: pr.node_id,
                 mergeMethod: 'SQUASH',
               });
+
+              core.info(`PR #${pr.number}: Attempting to merge and delete branch.`);
+
+              try {
+                // Perform the merge
+                await github.rest.pulls.merge({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  merge_method: 'squash'
+                });
+                core.info(`PR #${pr.number} merged successfully.`);
+
+                // Delete the branch if it's not from a fork
+                if (pr.head.repo.full_name === context.repo.full_name) {
+                  try {
+                    await github.rest.git.deleteRef({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      ref: `heads/${pr.head.ref}`
+                    });
+                    core.info(`Branch ${pr.head.ref} deleted successfully.`);
+                  } catch (deleteError) {
+                    core.warning(`Could not delete branch ${pr.head.ref}: ${deleteError.message}`);
+                  }
+                }
+              } catch (mergeError) {
+                core.error(`Failed to merge PR #${pr.number}: ${mergeError.message}`);
+              }
             }
