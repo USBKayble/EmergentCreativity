@@ -48,8 +48,8 @@ class TestTenantNetworkShapes:
         logits, value, (hx, cx) = net(vision, nv)
         assert logits.shape == (2, N_ACTIONS)
         assert value.shape  == (2, 1)
-        assert hx.shape     == (2, 256)  # HIDDEN_DIM = 256
-        assert cx.shape     == (2, 256)
+        assert hx.shape     == (2, 1024)  # HIDDEN_DIM = 1024
+        assert cx.shape     == (2, 1024)
 
     def test_lstm_state_passed_through(self, net, dummy_batch):
         vision, nv = dummy_batch
@@ -208,6 +208,11 @@ class TestOnlineLearner:
         """Network weights must change after a single act+observe cycle."""
         obs    = _make_dummy_obs()
         before = {k: v.clone() for k, v in learner.net.named_parameters()}
+
+        # Override accumulation steps to 1 for this test so the gradient step
+        # fires immediately on the first observe.
+        learner._gradient_accumulation_steps = 1
+
         learner.act(obs)
         learner.observe(obs, 1.0, False)
         changed = any(

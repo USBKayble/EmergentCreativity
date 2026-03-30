@@ -133,6 +133,11 @@ class OnlineLearner:
         self._last_loss: float = 0.0
         self._last_stats: Dict = {}
 
+        # Internal states for 1-step TD learning
+        self._pending_value: Optional["torch.Tensor"] = None
+        self._pending_log_prob: Optional["torch.Tensor"] = None
+        self._pending_entropy: Optional["torch.Tensor"] = None
+
         print(
             f"[OnlineLearner] Initialised on {self.device}. "
             f"Gradient update on every environment step."
