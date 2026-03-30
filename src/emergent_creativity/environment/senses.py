@@ -164,9 +164,7 @@ class HearingSense:
         agent_pos: Tuple[float, float, float],
     ) -> np.ndarray:
         levels = np.zeros(HEARING_DIM, dtype=np.float32)
-        for obj in self._registry.all():
-            if obj.sensory.sound_level <= 0:
-                continue
+        for obj in self._registry.sound_emitters():
             dist = self._registry.distance(obj.body_id, agent_pos)
             if dist > self.MAX_HEARING_DISTANCE:
                 continue

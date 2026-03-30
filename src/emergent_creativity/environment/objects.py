@@ -487,15 +487,19 @@ class ObjectRegistry:
     def __init__(self) -> None:
         self._objects: Dict[int, WorldObject] = {}
         self._positions: Dict[int, Tuple[float, float, float]] = {}
+        self._sound_emitters: List[WorldObject] = []
 
     def register(self, obj: WorldObject) -> None:
         if obj.body_id < 0:
             raise ValueError(f"Object '{obj.name}' has no valid body_id.")
         self._objects[obj.body_id] = obj
+        if obj.sensory.sound_level > 0:
+            self._sound_emitters.append(obj)
 
     def unregister(self, body_id: int) -> None:
         self._objects.pop(body_id, None)
         self._positions.pop(body_id, None)
+        self._sound_emitters = [o for o in self._sound_emitters if o.body_id != body_id]
 
     def update_position(
         self, body_id: int, pos: Tuple[float, float, float]
@@ -507,6 +511,9 @@ class ObjectRegistry:
 
     def all(self) -> List[WorldObject]:
         return list(self._objects.values())
+
+    def sound_emitters(self) -> List[WorldObject]:
+        return self._sound_emitters
 
     def position_of(
         self, body_id: int
@@ -568,3 +575,4 @@ class ObjectRegistry:
     def clear(self) -> None:
         self._objects.clear()
         self._positions.clear()
+        self._sound_emitters.clear()
