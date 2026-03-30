@@ -44,12 +44,13 @@ def dummy_batch(batch_size=2):
 
 class TestTenantNetworkShapes:
     def test_forward_output_shapes(self, net, dummy_batch):
+        from src.emergent_creativity.nn.architecture import HIDDEN_DIM
         vision, nv = dummy_batch
         logits, value, (hx, cx) = net(vision, nv)
         assert logits.shape == (2, N_ACTIONS)
         assert value.shape  == (2, 1)
-        assert hx.shape     == (2, 256)  # HIDDEN_DIM = 256
-        assert cx.shape     == (2, 256)
+        assert hx.shape     == (2, HIDDEN_DIM)
+        assert cx.shape     == (2, HIDDEN_DIM)
 
     def test_lstm_state_passed_through(self, net, dummy_batch):
         vision, nv = dummy_batch
@@ -208,8 +209,12 @@ class TestOnlineLearner:
         """Network weights must change after a single act+observe cycle."""
         obs    = _make_dummy_obs()
         before = {k: v.clone() for k, v in learner.net.named_parameters()}
-        learner.act(obs)
-        learner.observe(obs, 1.0, False)
+
+        # Depending on accumulation steps, we might need multiple steps
+        for _ in range(learner._gradient_accumulation_steps):
+            learner.act(obs)
+            learner.observe(obs, 1.0, False)
+
         changed = any(
             not torch.equal(before[k], v)
             for k, v in learner.net.named_parameters()
