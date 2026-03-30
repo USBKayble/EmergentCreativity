@@ -39,7 +39,6 @@ from .actions import (
 
 try:
     import pybullet as pb
-    import pybullet_data
 
     _PB = True
     LINK_FRAME = pb.LINK_FRAME if hasattr(pb, "LINK_FRAME") else 2
