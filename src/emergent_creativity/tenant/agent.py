@@ -28,7 +28,6 @@ from ..environment.physics_world import PhysicsWorld
 from ..environment.senses import SensorySuite, SensoryObservation
 from .actions import (
     Action,
-    MOVE_SPEED,
     TURN_SPEED_DEG,
     REACH_DISTANCE,
     SLEEP_DISTANCE,
