@@ -48,8 +48,8 @@ class TestTenantNetworkShapes:
         logits, value, (hx, cx) = net(vision, nv)
         assert logits.shape == (2, N_ACTIONS)
         assert value.shape  == (2, 1)
-        assert hx.shape     == (2, 256)  # HIDDEN_DIM = 256
-        assert cx.shape     == (2, 256)
+        assert hx.shape     == (2, 1024)  # HIDDEN_DIM = 1024
+        assert cx.shape     == (2, 1024)
 
     def test_lstm_state_passed_through(self, net, dummy_batch):
         vision, nv = dummy_batch
@@ -205,11 +205,13 @@ class TestOnlineLearner:
         assert {"loss", "actor_loss", "critic_loss", "entropy"} <= stats.keys()
 
     def test_weights_change_after_single_step(self, learner):
-        """Network weights must change after a single act+observe cycle."""
+        """Network weights must change after gradient accumulation steps."""
         obs    = _make_dummy_obs()
         before = {k: v.clone() for k, v in learner.net.named_parameters()}
-        learner.act(obs)
-        learner.observe(obs, 1.0, False)
+        # Must run for _gradient_accumulation_steps (default 4) to trigger optimizer.step()
+        for _ in range(4):
+            learner.act(obs)
+            learner.observe(obs, 1.0, False)
         changed = any(
             not torch.equal(before[k], v)
             for k, v in learner.net.named_parameters()

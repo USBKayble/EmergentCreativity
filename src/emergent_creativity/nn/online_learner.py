@@ -127,6 +127,9 @@ class OnlineLearner:
         self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
         self._gradient_accumulation_steps = 4
         self._accumulated_steps = 0
+        self._pending_value = None
+        self._pending_log_prob = None
+        self._pending_entropy = None
 
         # Statistics
         self._step_count: int = 0
@@ -243,6 +246,9 @@ class OnlineLearner:
             else:
                 self.optimizer.step()
             self._accumulated_steps = 0
+        self._pending_value = None
+        self._pending_log_prob = None
+        self._pending_entropy = None
 
         # Free the retained graph tensors.
         self._pending_log_prob = None
