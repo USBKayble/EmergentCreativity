@@ -234,6 +234,9 @@ class Tenant:
         Execute one action and update internal state.
         Emits events into self.events.
         """
+        if self._body_id < 0:
+            return
+
         self.total_steps += 1
         self.events.clear()
 
