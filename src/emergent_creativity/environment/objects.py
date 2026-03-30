@@ -12,7 +12,6 @@ Each :class:`WorldObject` wraps a PyBullet body ID with gameplay metadata:
 The :class:`ObjectRegistry` acts as an in-memory catalogue of all live objects
 and provides spatial queries (nearest object, objects in radius, etc.).
 """
-from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
