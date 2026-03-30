@@ -1,6 +1,5 @@
 """
 tests/test_network.py
-=====================
 Unit tests for the neural network architecture.
 These tests require PyTorch but NOT PyBullet or Gymnasium.
 Skipped automatically if torch is unavailable.
@@ -205,16 +204,18 @@ class TestOnlineLearner:
         assert {"loss", "actor_loss", "critic_loss", "entropy"} <= stats.keys()
 
     def test_weights_change_after_single_step(self, learner):
-        """Network weights must change after a single act+observe cycle."""
+        """Network weights must change after an accumulated act+observe cycle."""
         obs    = _make_dummy_obs()
         before = {k: v.clone() for k, v in learner.net.named_parameters()}
-        learner.act(obs)
-        learner.observe(obs, 1.0, False)
+        # OnlineLearner accumulates gradients over multiple steps now.
+        for _ in range(learner._gradient_accumulation_steps):
+            learner.act(obs)
+            learner.observe(obs, 1.0, False)
         changed = any(
             not torch.equal(before[k], v)
             for k, v in learner.net.named_parameters()
         )
-        assert changed, "No weight change detected after gradient step"
+        assert changed, "No weight change detected after gradient steps"
 
     def test_reset_lstm_does_not_crash(self, learner):
         learner.reset_lstm()  # callable at any time

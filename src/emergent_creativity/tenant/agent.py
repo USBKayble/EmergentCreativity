@@ -14,8 +14,6 @@ Events are plain strings stored in a list that is drained each step by
 :class:`~emergent_creativity.rewards.ruleset.RewardEvaluator`.
 """
 
-from __future__ import annotations
-
 import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -23,7 +21,6 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 from ..environment.objects import (
-    ObjectCategory,
     ObjectRegistry,
     WorldObject,
 )
@@ -31,7 +28,6 @@ from ..environment.physics_world import PhysicsWorld
 from ..environment.senses import SensorySuite, SensoryObservation
 from .actions import (
     Action,
-    MOVE_SPEED,
     TURN_SPEED_DEG,
     REACH_DISTANCE,
     SLEEP_DISTANCE,
@@ -40,7 +36,6 @@ from .actions import (
 
 try:
     import pybullet as pb
-    import pybullet_data
 
     _PB = True
     LINK_FRAME = pb.LINK_FRAME if hasattr(pb, "LINK_FRAME") else 2
