@@ -65,6 +65,70 @@ ROOM_D = 5.0
 # Default config path (relative to project root)
 DEFAULT_CONFIG = Path(__file__).parents[3] / "config" / "rewards.yaml"
 
+def _eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
+    """Safely evaluate a parsed AST expression."""
+    if isinstance(node, ast.Expression):
+        return _eval_ast(node.body, ctx)
+    elif isinstance(node, ast.Constant):
+        return node.value
+    elif isinstance(node, ast.Name):
+        if node.id in ctx:
+            return ctx[node.id]
+        raise ValueError(f"Variable '{node.id}' not found in context")
+    elif isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            for value in node.values:
+                if not _eval_ast(value, ctx):
+                    return False
+            return True
+        elif isinstance(node.op, ast.Or):
+            for value in node.values:
+                if _eval_ast(value, ctx):
+                    return True
+            return False
+    elif isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not):
+            return not _eval_ast(node.operand, ctx)
+        elif isinstance(node.op, ast.USub):
+            return -_eval_ast(node.operand, ctx)
+        elif isinstance(node.op, ast.UAdd):
+            return +_eval_ast(node.operand, ctx)
+    elif isinstance(node, ast.Compare):
+        left = _eval_ast(node.left, ctx)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _eval_ast(comparator, ctx)
+            if isinstance(op, ast.Eq):
+                res = left == right
+            elif isinstance(op, ast.NotEq):
+                res = left != right
+            elif isinstance(op, ast.Lt):
+                res = left < right
+            elif isinstance(op, ast.LtE):
+                res = left <= right
+            elif isinstance(op, ast.Gt):
+                res = left > right
+            elif isinstance(op, ast.GtE):
+                res = left >= right
+            else:
+                raise ValueError(f"Unsupported comparison operator: {type(op).__name__}")
+            if not res:
+                return False
+            left = right
+        return True
+    elif isinstance(node, ast.BinOp):
+        left = _eval_ast(node.left, ctx)
+        right = _eval_ast(node.right, ctx)
+        if isinstance(node.op, ast.Add):
+            return left + right
+        elif isinstance(node.op, ast.Sub):
+            return left - right
+        elif isinstance(node.op, ast.Mult):
+            return left * right
+        elif isinstance(node.op, ast.Div):
+            return left / right
+    raise ValueError(f"Unsupported AST node: {type(node).__name__}")
+
+
 # Allowlist of AST node types permitted in condition expressions
 _ALLOWED_NODES = (
     ast.Expression,
@@ -91,14 +155,14 @@ _ALLOWED_NODES = (
 )
 
 
-def _compile_condition(expr: str) -> Optional[Tuple[CodeType, Set[str]]]:
+def _compile_condition(expr: str) -> Optional[Tuple[ast.AST, Set[str]]]:
     """
-    Parse and compile a simple boolean condition safely.
+    Parse and validate a simple boolean condition safely.
 
     Only allows comparisons, boolean logic, numeric literals, and variable references.
     No function calls, imports, or attribute access are permitted.
 
-    Returns a tuple of (compiled_code, required_variable_names), or None if parsing fails.
+    Returns a tuple of (AST tree, required_variable_names), or None if parsing fails.
     """
     try:
         tree = ast.parse(expr, mode="eval")
@@ -112,12 +176,7 @@ def _compile_condition(expr: str) -> Optional[Tuple[CodeType, Set[str]]]:
 
     required_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
 
-    # Compile the AST to a code object
-    try:
-        compiled_code = compile(tree, "<condition>", "eval")
-        return compiled_code, required_names
-    except Exception:
-        return None
+    return tree, required_names
 
 
 # ---------------------------------------------------------------------------
@@ -161,9 +220,7 @@ class Rule:
             return False
 
         try:
-            return bool(
-                eval(self._compiled_condition, {"__builtins__": {}}, ctx)
-            )  # noqa: S307
+            return bool(_eval_ast(self._compiled_condition, ctx))
         except Exception:
             return False
 
