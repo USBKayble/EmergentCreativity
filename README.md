@@ -62,7 +62,7 @@ is supported via PyTorch CUDA (with automatic CPU fallback).
 | **Physics** | [PyBullet](https://github.com/bulletphysics/bullet3) | Real-time rigid-body simulation |
 | **RL env** | [Gymnasium](https://gymnasium.farama.org/) | Standard `reset/step/render` API |
 | **Neural Net** | [PyTorch](https://pytorch.org/) | Multi-modal Actor-Critic with LSTM |
-| **RL Algorithm** | Custom PPO | Proximal Policy Optimisation on GPU |
+| **RL Algorithm** | Custom PPO & Online AC | PPO on GPU & Per-step Online Actor-Critic |
 | **Config** | YAML | Human-editable reward rules |
 | **Viewer** | [pygame](https://www.pygame.org/) | Interactive real-time UI |
 
@@ -86,6 +86,7 @@ EmergentCreativity/
 │       │   └── actions.py        ← 13-action discrete space
 │       ├── nn/
 │       │   ├── architecture.py   ← neuroplastic multi-modal network
+│       │   ├── online_learner.py ← per-step online actor-critic
 │       │   └── trainer.py        ← PPO training loop (GPU-ready)
 │       ├── rewards/
 │       │   └── ruleset.py        ← YAML-driven reward evaluator
@@ -118,11 +119,12 @@ For GPU-accelerated training (recommended) install the CUDA version of PyTorch:
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 ```
 
-### 2. Run the interactive viewer (manual control — no GPU needed)
+### 2. Run the interactive viewer (online learning enabled by default)
 
 ```bash
 python main.py view
 ```
+*Note: The viewer starts in online learning mode. Press `I` to toggle to manual control.*
 
 ### 3. Train the neural network
 
@@ -169,6 +171,22 @@ The viewer opens a **1280 × 720** window with three panels:
 ---
 
 ## Training the Agent
+
+### Online Learning (Real-Time)
+
+When running the interactive viewer, the agent uses a **per-step online Actor-Critic** algorithm by default. It learns on every single environment step using a 1-step TD(0) advantage.
+
+```bash
+# Start learning from scratch while watching
+python main.py view
+
+# Resume learning from an online checkpoint
+python main.py view --nn checkpoints/online_5000.pt
+```
+
+### Headless PPO Training (Batch)
+
+For faster, background training, you can use the headless PPO trainer:
 
 ```bash
 # Basic training
