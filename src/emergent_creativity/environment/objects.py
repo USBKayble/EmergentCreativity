@@ -18,8 +18,6 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Enumerations
