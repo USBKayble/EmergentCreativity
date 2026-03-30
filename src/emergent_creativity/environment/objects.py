@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -137,6 +137,17 @@ class WorldObject:
         raise NotImplementedError(
             "Call ObjectRegistry.distance_to() which knows object positions."
         )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "on_floor":
+            old_value = getattr(self, "on_floor", None)
+            super().__setattr__(name, value)
+            if old_value is not None and old_value != value:
+                registry = getattr(self, "_registry", None)
+                if registry is not None:
+                    registry._notify_on_floor_changed(self, old_value, value)
+        else:
+            super().__setattr__(name, value)
 
 
 # ---------------------------------------------------------------------------
@@ -487,15 +498,31 @@ class ObjectRegistry:
     def __init__(self) -> None:
         self._objects: Dict[int, WorldObject] = {}
         self._positions: Dict[int, Tuple[float, float, float]] = {}
+        self._cached_mess_count: int = 0
 
     def register(self, obj: WorldObject) -> None:
         if obj.body_id < 0:
             raise ValueError(f"Object '{obj.name}' has no valid body_id.")
         self._objects[obj.body_id] = obj
+        obj._registry = self
+        if obj.is_mess and obj.on_floor:
+            self._cached_mess_count += 1
 
     def unregister(self, body_id: int) -> None:
+        obj = self._objects.get(body_id)
+        if obj is not None:
+            if obj.is_mess and obj.on_floor:
+                self._cached_mess_count -= 1
+            obj._registry = None
         self._objects.pop(body_id, None)
         self._positions.pop(body_id, None)
+
+    def _notify_on_floor_changed(self, obj: WorldObject, old_val: bool, new_val: bool) -> None:
+        if obj.is_mess:
+            if new_val and not old_val:
+                self._cached_mess_count += 1
+            elif not new_val and old_val:
+                self._cached_mess_count -= 1
 
     def update_position(
         self, body_id: int, pos: Tuple[float, float, float]
@@ -561,10 +588,11 @@ class ObjectRegistry:
 
     def mess_count(self) -> int:
         """Number of mess objects currently on the floor."""
-        return sum(
-            1 for o in self._objects.values() if o.is_mess and o.on_floor
-        )
+        return self._cached_mess_count
 
     def clear(self) -> None:
+        for obj in self._objects.values():
+            obj._registry = None
         self._objects.clear()
         self._positions.clear()
+        self._cached_mess_count = 0
