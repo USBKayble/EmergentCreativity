@@ -1,6 +1,6 @@
 """
 sim_env.py
-==========
+===
 Gymnasium-compatible environment wrapping the full apartment simulation.
 
 This is the primary interface for RL training.  The observation space

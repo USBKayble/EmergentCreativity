@@ -1,7 +1,62 @@
 import pytest
+from unittest.mock import MagicMock, PropertyMock
+import numpy as np
+
+from src.emergent_creativity.sim_env import TenantEnv
 from src.emergent_creativity.sim_env import TenantEnv as ApartmentEnv
 
-def test_apartment_env_step_without_reset_raises_error():
-    env = ApartmentEnv(gui=False)
-    with pytest.raises(RuntimeError, match=r"Environment not built\. Call reset\(\) first\."):
-        env.step(0)
+class TestTenantEnvStep:
+    def test_apartment_env_step_without_reset_raises_error(self):
+        env = ApartmentEnv(gui=False)
+        with pytest.raises(RuntimeError, match=r"Environment not built\. Call reset\(\) first\."):
+            env.step(0)
+
+    def test_step_success(self, monkeypatch):
+        # Create a mock environment without starting pybullet or loading real config
+        env = TenantEnv()
+
+        # Mock the internal components
+        env._tenant = MagicMock()
+        env._world = MagicMock()  # This provides `env.physics`
+        env._apartment = MagicMock()
+        env._registry = MagicMock()
+        env._evaluator = MagicMock()
+
+        # Set up mock returns
+        env._evaluator.evaluate.return_value = (10.0, {"eat_food": 10.0})
+        env._evaluator.is_terminal.return_value = False
+
+        env._tenant.vitals.to_array.return_value = np.array([0.5, 0.5, 0.5, 0.5])
+        env._tenant.events = ["ate_food"]
+        env._tenant.total_steps = 42
+
+        env._registry.mess_count.return_value = 2
+
+        # Mock _get_obs to avoid sensory/observation computation
+        dummy_obs = {"vision": np.zeros((64, 64, 3))}
+        monkeypatch.setattr(env, "_get_obs", MagicMock(return_value=dummy_obs))
+
+        # Perform the step
+        action = 1
+        obs, reward, terminated, truncated, info = env.step(action)
+
+        # Assert correct methods were called
+        env._tenant.step.assert_called_once_with(action)
+        env._world.step.assert_called_once_with()
+        env._apartment.sync_registry.assert_called_once_with()
+        env._evaluator.evaluate.assert_called_once_with(env._tenant, env._registry)
+        env._evaluator.is_terminal.assert_called_once_with(env._tenant)
+        env._get_obs.assert_called_once_with()
+
+        # Assert correct returns
+        assert obs == dummy_obs
+        assert reward == 10.0
+        assert terminated is False
+        assert truncated is False
+        assert info == {
+            "reward_breakdown": {"eat_food": 10.0},
+            "vitals": [0.5, 0.5, 0.5, 0.5],
+            "events": ["ate_food"],
+            "mess_count": 2,
+            "step": 42,
+        }
