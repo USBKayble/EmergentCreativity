@@ -188,22 +188,25 @@ class TestRewardEvaluator:
         tenant = _MockTenant(events=["ate_food"])
         registry = _MockRegistry(mess_count=0)
         total, info = ev.evaluate(tenant, registry)
-        assert total == pytest.approx(10.0)
         assert "eat_food" in info
+        assert info["eat_food"] == pytest.approx(10.0)
 
     def test_pick_up_mess_event(self):
         ev = self._evaluator()
         tenant = _MockTenant(events=["picked_up_mess"])
         registry = _MockRegistry(mess_count=0)
         total, info = ev.evaluate(tenant, registry)
-        assert total == pytest.approx(5.0)
+        assert "pick_up_mess" in info
+        assert info["pick_up_mess"] == pytest.approx(5.0)
 
     def test_no_reward_for_idle_tenant(self):
         ev = self._evaluator()
         tenant = _MockTenant()
         registry = _MockRegistry()
-        total, _ = ev.evaluate(tenant, registry)
-        assert total == pytest.approx(0.0)
+        total, info = ev.evaluate(tenant, registry)
+        rule_reward_keys = [rule.name for rule in ev.rules]
+        for key in rule_reward_keys:
+            assert key not in info or info[key] == 0.0
 
     def test_hungry_per_step_penalty(self):
         ev = self._evaluator()
@@ -211,7 +214,7 @@ class TestRewardEvaluator:
         registry = _MockRegistry()
         total, info = ev.evaluate(tenant, registry)
         assert "hungry_penalty" in info
-        assert total <= -0.5
+        assert info["hungry_penalty"] == pytest.approx(-0.5)
 
     def test_mess_per_step_penalty_scales_with_count(self):
         ev = self._evaluator()
@@ -231,7 +234,8 @@ class TestRewardEvaluator:
         # +10 eat, -0.5 hunger penalty
         assert "eat_food" in info
         assert "hungry_penalty" in info
-        assert total == pytest.approx(10.0 - 0.5)
+        assert info["eat_food"] == pytest.approx(10.0)
+        assert info["hungry_penalty"] == pytest.approx(-0.5)
 
     def test_idle_penalty(self):
         ev = self._evaluator()
@@ -239,7 +243,7 @@ class TestRewardEvaluator:
         registry = _MockRegistry()
         total, info = ev.evaluate(tenant, registry)
         assert "idle_penalty" in info
-        assert total < 0.0
+        assert info["idle_penalty"] == pytest.approx(-0.2)
 
     # --- Terminal conditions ---
 

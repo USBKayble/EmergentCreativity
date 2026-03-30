@@ -686,6 +686,17 @@ class RewardEvaluator:
 
     def is_terminal(self, tenant: Any) -> bool:
         """Return True when the episode should end."""
+        hunger_max = float(self.terminal.get("hunger_max", 1.0))
+        energy_min = float(self.terminal.get("energy_min", 0.0))
+        max_steps = int(self.terminal.get("max_steps", 50000))
+
+        if tenant.vitals.hunger >= hunger_max:
+            return True
+        if tenant.vitals.energy <= energy_min:
+            return True
+        if getattr(tenant, "total_steps", 0) >= max_steps:
+            return True
+
         return False
 
     @property
