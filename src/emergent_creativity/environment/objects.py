@@ -23,53 +23,56 @@ from typing import Dict, List, Optional, Tuple
 # Enumerations
 # ---------------------------------------------------------------------------
 
+
 class ObjectCategory(Enum):
-    FURNITURE    = auto()
-    FOOD         = auto()
-    BEVERAGE     = auto()
-    MESS         = auto()
-    APPLIANCE    = auto()
+    FURNITURE = auto()
+    FOOD = auto()
+    BEVERAGE = auto()
+    MESS = auto()
+    APPLIANCE = auto()
     ENTERTAINMENT = auto()
-    CLEANING     = auto()
-    HYGIENE      = auto()
-    CLOTHING     = auto()
-    MISC         = auto()
+    CLEANING = auto()
+    HYGIENE = auto()
+    CLOTHING = auto()
+    MISC = auto()
 
 
 class SmellType(Enum):
-    NONE     = auto()
-    FOOD     = auto()
-    GARBAGE  = auto()
-    CLEAN    = auto()
-    MUSTY    = auto()
-    FLORAL   = auto()
+    NONE = auto()
+    FOOD = auto()
+    GARBAGE = auto()
+    CLEAN = auto()
+    MUSTY = auto()
+    FLORAL = auto()
     CHEMICAL = auto()
 
 
 class TasteType(Enum):
-    NONE    = auto()
-    SWEET   = auto()
-    SALTY   = auto()
-    SOUR    = auto()
-    BITTER  = auto()
-    UMAMI   = auto()
+    NONE = auto()
+    SWEET = auto()
+    SALTY = auto()
+    SOUR = auto()
+    BITTER = auto()
+    UMAMI = auto()
 
 
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SensoryProfile:
     """Sensory attributes of an object."""
+
     smell_type: SmellType = SmellType.NONE
-    smell_intensity: float = 0.0          # 0–1
+    smell_intensity: float = 0.0  # 0–1
     taste_type: TasteType = TasteType.NONE
-    taste_intensity: float = 0.0          # 0–1
-    sound_level: float = 0.0              # dB equivalent, 0–100
-    sound_label: str = ""                 # e.g. "tv_audio", "running_water"
-    temperature: float = 20.0            # Celsius, affects comfort
-    texture: float = 0.5                  # 0=smooth, 1=rough (touch)
+    taste_intensity: float = 0.0  # 0–1
+    sound_level: float = 0.0  # dB equivalent, 0–100
+    sound_label: str = ""  # e.g. "tv_audio", "running_water"
+    temperature: float = 20.0  # Celsius, affects comfort
+    texture: float = 0.5  # 0=smooth, 1=rough (touch)
 
 
 @dataclass
@@ -101,6 +104,7 @@ class WorldObject:
     nutrition : float
         Hunger reduction when eaten (0–1).
     """
+
     name: str
     category: ObjectCategory
     body_id: int = -1
@@ -115,19 +119,19 @@ class WorldObject:
     is_mess: bool = False
     is_appliance: bool = False
     is_interactive: bool = False
-    is_surface: bool = False    # table-top / shelf etc.
+    is_surface: bool = False  # table-top / shelf etc.
 
     # Mutable state
     on_floor: bool = False
     dirty: bool = False
-    active: bool = False        # e.g. TV turned on
-    consumed: bool = False      # food has been eaten
+    active: bool = False  # e.g. TV turned on
+    consumed: bool = False  # food has been eaten
     held_by_agent: bool = False
 
     # Nutrition / utility values
-    nutrition: float = 0.0      # hunger reduction 0–1
+    nutrition: float = 0.0  # hunger reduction 0–1
     entertainment: float = 0.0  # entertainment value per step 0–1
-    energy_restore: float = 0.0 # energy restored if used
+    energy_restore: float = 0.0  # energy restored if used
 
     def distance_to(self, other_pos: Tuple[float, float, float]) -> float:
         """Euclidean distance from this object's body_id to a world position."""
@@ -139,6 +143,7 @@ class WorldObject:
 # ---------------------------------------------------------------------------
 # Object factory – pre-defined archetypes
 # ---------------------------------------------------------------------------
+
 
 def make_apple(body_id: int = -1) -> WorldObject:
     return WorldObject(
@@ -448,30 +453,31 @@ def make_shower(body_id: int = -1) -> WorldObject:
 
 # Registry of all archetypes for easy lookup
 OBJECT_FACTORIES: Dict[str, callable] = {
-    "apple":           make_apple,
-    "pizza":           make_pizza,
-    "water_bottle":    make_water_bottle,
-    "dirty_sock":      make_dirty_sock,
-    "crumpled_paper":  make_crumpled_paper,
-    "tv":              make_tv,
-    "book":            make_book,
+    "apple": make_apple,
+    "pizza": make_pizza,
+    "water_bottle": make_water_bottle,
+    "dirty_sock": make_dirty_sock,
+    "crumpled_paper": make_crumpled_paper,
+    "tv": make_tv,
+    "book": make_book,
     "game_controller": make_game_controller,
-    "broom":           make_broom,
-    "trash_bin":       make_trash_bin,
-    "bed":             make_bed,
-    "sofa":            make_sofa,
-    "dining_table":    make_dining_table,
-    "chair":           make_chair,
-    "fridge":          make_fridge,
-    "stove":           make_stove,
-    "toilet":          make_toilet,
-    "shower":          make_shower,
+    "broom": make_broom,
+    "trash_bin": make_trash_bin,
+    "bed": make_bed,
+    "sofa": make_sofa,
+    "dining_table": make_dining_table,
+    "chair": make_chair,
+    "fridge": make_fridge,
+    "stove": make_stove,
+    "toilet": make_toilet,
+    "shower": make_shower,
 }
 
 
 # ---------------------------------------------------------------------------
 # Object Registry
 # ---------------------------------------------------------------------------
+
 
 class ObjectRegistry:
     """
@@ -484,6 +490,7 @@ class ObjectRegistry:
     def __init__(self) -> None:
         self._objects: Dict[int, WorldObject] = {}
         self._positions: Dict[int, Tuple[float, float, float]] = {}
+        self._sound_emitters: List[WorldObject] = []
         self._version: int = 0
 
     def register(self, obj: WorldObject) -> None:
@@ -491,15 +498,16 @@ class ObjectRegistry:
             raise ValueError(f"Object '{obj.name}' has no valid body_id.")
         self._objects[obj.body_id] = obj
         self._version += 1
+        if obj.sensory.sound_level > 0:
+            self._sound_emitters.append(obj)
 
     def unregister(self, body_id: int) -> None:
         self._objects.pop(body_id, None)
         self._positions.pop(body_id, None)
         self._version += 1
+        self._sound_emitters = [o for o in self._sound_emitters if o.body_id != body_id]
 
-    def update_position(
-        self, body_id: int, pos: Tuple[float, float, float]
-    ) -> None:
+    def update_position(self, body_id: int, pos: Tuple[float, float, float]) -> None:
         self._positions[body_id] = pos
 
     def get(self, body_id: int) -> Optional[WorldObject]:
@@ -508,9 +516,10 @@ class ObjectRegistry:
     def all(self) -> List[WorldObject]:
         return list(self._objects.values())
 
-    def position_of(
-        self, body_id: int
-    ) -> Optional[Tuple[float, float, float]]:
+    def sound_emitters(self) -> List[WorldObject]:
+        return self._sound_emitters
+
+    def position_of(self, body_id: int) -> Optional[Tuple[float, float, float]]:
         return self._positions.get(body_id)
 
     def distance(
@@ -561,11 +570,10 @@ class ObjectRegistry:
 
     def mess_count(self) -> int:
         """Number of mess objects currently on the floor."""
-        return sum(
-            1 for o in self._objects.values() if o.is_mess and o.on_floor
-        )
+        return sum(1 for o in self._objects.values() if o.is_mess and o.on_floor)
 
     def clear(self) -> None:
         self._objects.clear()
         self._positions.clear()
         self._version += 1
+        self._sound_emitters.clear()
