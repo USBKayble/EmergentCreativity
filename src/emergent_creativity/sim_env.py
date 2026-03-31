@@ -1,6 +1,6 @@
 """
 sim_env.py
-==========
+===
 Gymnasium-compatible environment wrapping the full apartment simulation.
 
 This is the primary interface for RL training.  The observation space
@@ -175,8 +175,8 @@ class TenantEnv:
     def step(
         self, action: int
     ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, dict]:
-        """Advances the environment by one step."""
-        if self._tenant is None or self.physics is None or self._evaluator is None:
+        """Apply *action*, advance simulation by one step."""
+        if self._tenant is None or self._world is None or self._evaluator is None:
             raise RuntimeError("Environment not built. Call reset() first.")
 
         # Execute action

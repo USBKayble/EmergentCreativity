@@ -3,11 +3,23 @@ from unittest.mock import MagicMock, PropertyMock
 import numpy as np
 
 from src.emergent_creativity.sim_env import TenantEnv
+from src.emergent_creativity.sim_env import TenantEnv as ApartmentEnv
+
 
 class TestTenantEnvStep:
     def test_step_uninitialized(self):
         env = TenantEnv()
-        with pytest.raises(RuntimeError, match="Environment not built. Call reset\\(\\) first."):
+        with pytest.raises(
+            RuntimeError, match="Environment not built. Call reset\\(\\) first."
+        ):
+            env.step(0)
+
+    def test_apartment_env_step_without_reset_raises_error(self):
+        env = ApartmentEnv(gui=False)
+        with pytest.raises(
+            RuntimeError, match=r"Environment not built\. Call reset\(\) first\."
+        ):
+            env.step(0)
             env.step(0)
 
     def test_step_success(self, monkeypatch):
