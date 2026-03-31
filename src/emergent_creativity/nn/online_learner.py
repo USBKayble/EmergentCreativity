@@ -125,7 +125,7 @@ class OnlineLearner:
             1, device=self.device
         )
         self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
-        self._gradient_accumulation_steps = 4
+        self._gradient_accumulation_steps = 1
         self._accumulated_steps = 0
         self._pending_value = None
         self._pending_log_prob = None
@@ -143,6 +143,8 @@ class OnlineLearner:
         self._step_count: int = 0
         self._last_loss: float = 0.0
         self._last_stats: Dict = {}
+
+        self._pending_value = None
 
         print(
             f"[OnlineLearner] Initialised on {self.device}. "
