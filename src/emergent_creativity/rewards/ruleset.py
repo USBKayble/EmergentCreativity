@@ -61,48 +61,20 @@ import numpy as np
 ROOM_W = 5.0
 ROOM_D = 5.0
 
-# Supported operators mapping
-_OPERATORS = {
-    ast.Add: _op.add,
-    ast.Sub: _op.sub,
-    ast.Mult: _op.mul,
-    ast.Div: _op.truediv,
-    ast.Eq: _op.eq,
-    ast.NotEq: _op.ne,
-    ast.Lt: _op.lt,
-    ast.LtE: _op.le,
-    ast.Gt: _op.gt,
-    ast.GtE: _op.ge,
-    ast.And: lambda a, b: a and b,
-    ast.Or: lambda a, b: a or b,
-    ast.Not: _op.not_,
-}
+# Default config path (relative to project root)
+DEFAULT_CONFIG = Path(__file__).parents[3] / "config" / "rewards.yaml"
+
 
 def _eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
-    """Safely evaluate an AST node using the provided context."""
+    """Safely evaluate a parsed AST expression."""
     if isinstance(node, ast.Expression):
         return _eval_ast(node.body, ctx)
     elif isinstance(node, ast.Constant):
         return node.value
     elif isinstance(node, ast.Name):
-        if node.id not in ctx:
-            raise NameError(f"name '{node.id}' is not defined")
-        return ctx[node.id]
-    elif isinstance(node, ast.UnaryOp):
-        operand = _eval_ast(node.operand, ctx)
-        return _OPERATORS[type(node.op)](operand)
-    elif isinstance(node, ast.BinOp):
-        left = _eval_ast(node.left, ctx)
-        right = _eval_ast(node.right, ctx)
-        return _OPERATORS[type(node.op)](left, right)
-    elif isinstance(node, ast.Compare):
-        left = _eval_ast(node.left, ctx)
-        for op, comparator in zip(node.ops, node.comparators):
-            right = _eval_ast(comparator, ctx)
-            if not _OPERATORS[type(op)](left, right):
-                return False
-            left = right
-        return True
+        if node.id in ctx:
+            return ctx[node.id]
+        raise ValueError(f"Variable '{node.id}' not found in context")
     elif isinstance(node, ast.BoolOp):
         if isinstance(node.op, ast.And):
             for value in node.values:
@@ -114,11 +86,50 @@ def _eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
                 if _eval_ast(value, ctx):
                     return True
             return False
-    raise ValueError(f"Unsupported AST node type: {type(node)}")
+    elif isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not):
+            return not _eval_ast(node.operand, ctx)
+        elif isinstance(node.op, ast.USub):
+            return -_eval_ast(node.operand, ctx)
+        elif isinstance(node.op, ast.UAdd):
+            return +_eval_ast(node.operand, ctx)
+    elif isinstance(node, ast.Compare):
+        left = _eval_ast(node.left, ctx)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _eval_ast(comparator, ctx)
+            if isinstance(op, ast.Eq):
+                res = left == right
+            elif isinstance(op, ast.NotEq):
+                res = left != right
+            elif isinstance(op, ast.Lt):
+                res = left < right
+            elif isinstance(op, ast.LtE):
+                res = left <= right
+            elif isinstance(op, ast.Gt):
+                res = left > right
+            elif isinstance(op, ast.GtE):
+                res = left >= right
+            else:
+                raise ValueError(
+                    f"Unsupported comparison operator: {type(op).__name__}"
+                )
+            if not res:
+                return False
+            left = right
+        return True
+    elif isinstance(node, ast.BinOp):
+        left = _eval_ast(node.left, ctx)
+        right = _eval_ast(node.right, ctx)
+        if isinstance(node.op, ast.Add):
+            return left + right
+        elif isinstance(node.op, ast.Sub):
+            return left - right
+        elif isinstance(node.op, ast.Mult):
+            return left * right
+        elif isinstance(node.op, ast.Div):
+            return left / right
+    raise ValueError(f"Unsupported AST node: {type(node).__name__}")
 
-
-# Default config path (relative to project root)
-DEFAULT_CONFIG = Path(__file__).parents[3] / "config" / "rewards.yaml"
 
 # Allowlist of AST node types permitted in condition expressions
 _ALLOWED_NODES = (
@@ -148,12 +159,12 @@ _ALLOWED_NODES = (
 
 def _compile_condition(expr: str) -> Optional[Tuple[ast.AST, Set[str]]]:
     """
-    Parse and compile a simple boolean condition safely.
+    Parse and validate a simple boolean condition safely.
 
     Only allows comparisons, boolean logic, numeric literals, and variable references.
     No function calls, imports, or attribute access are permitted.
 
-    Returns a tuple of (parsed_ast, required_variable_names), or None if parsing fails.
+    Returns a tuple of (AST tree, required_variable_names), or None if parsing fails.
     """
     try:
         tree = ast.parse(expr, mode="eval")
@@ -322,7 +333,17 @@ class RewardEvaluator:
             self._relevant_objects = [
                 obj
                 for obj in registry.all()
-                if obj.name in ("fridge", "stove", "apple", "pizza", "water_bottle", "bed", "toilet", "tv")
+                if obj.name
+                in (
+                    "fridge",
+                    "stove",
+                    "apple",
+                    "pizza",
+                    "water_bottle",
+                    "bed",
+                    "toilet",
+                    "tv",
+                )
                 or "book" in obj.name
                 or "game" in obj.name
             ]
@@ -374,7 +395,7 @@ class RewardEvaluator:
         vitals: Any,
         room: str,
         proximity: Dict[str, float],
-        smell_intensities: Dict[str, float]
+        smell_intensities: Dict[str, float],
     ) -> Dict[str, Any]:
         return {
             "hunger": vitals.hunger,
@@ -450,7 +471,7 @@ class RewardEvaluator:
         tenant: Any,
         pos: Tuple[float, float, float],
         smell_intensities: Dict[str, float],
-        proximity: Dict[str, float]
+        proximity: Dict[str, float],
     ) -> None:
         self._prev_pos = pos
         self._prev_smell = smell_intensities
