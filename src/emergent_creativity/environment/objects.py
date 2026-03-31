@@ -12,14 +12,11 @@ Each :class:`WorldObject` wraps a PyBullet body ID with gameplay metadata:
 The :class:`ObjectRegistry` acts as an in-memory catalogue of all live objects
 and provides spatial queries (nearest object, objects in radius, etc.).
 """
-from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
-
-import numpy as np
 
 
 # ---------------------------------------------------------------------------
@@ -487,15 +484,18 @@ class ObjectRegistry:
     def __init__(self) -> None:
         self._objects: Dict[int, WorldObject] = {}
         self._positions: Dict[int, Tuple[float, float, float]] = {}
+        self._version: int = 0
 
     def register(self, obj: WorldObject) -> None:
         if obj.body_id < 0:
             raise ValueError(f"Object '{obj.name}' has no valid body_id.")
         self._objects[obj.body_id] = obj
+        self._version += 1
 
     def unregister(self, body_id: int) -> None:
         self._objects.pop(body_id, None)
         self._positions.pop(body_id, None)
+        self._version += 1
 
     def update_position(
         self, body_id: int, pos: Tuple[float, float, float]
@@ -568,3 +568,4 @@ class ObjectRegistry:
     def clear(self) -> None:
         self._objects.clear()
         self._positions.clear()
+        self._version += 1

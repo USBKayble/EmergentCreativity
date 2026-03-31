@@ -2,7 +2,7 @@ name: Auto-Fix CI Failures
 
 on:
   workflow_run:
-    workflows: ["Build EndOS ISO"]  # Replace with your CI workflow name
+    workflows: ["CI"]
     types: [completed]
 
 jobs:
