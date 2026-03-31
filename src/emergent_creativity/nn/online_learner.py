@@ -143,6 +143,7 @@ class OnlineLearner:
         self._step_count: int = 0
         self._last_loss: float = 0.0
         self._last_stats: Dict = {}
+        self._pending_value = None
 
         self._pending_value = None
 

@@ -1,6 +1,5 @@
 """
 tests/test_network.py
-=====================
 Unit tests for the neural network architecture.
 These tests require PyTorch but NOT PyBullet or Gymnasium.
 Skipped automatically if torch is unavailable.
