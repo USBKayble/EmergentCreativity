@@ -128,6 +128,10 @@ class OnlineLearner:
         self._gradient_accumulation_steps = 4
         self._accumulated_steps = 0
 
+        self._pending_value = None
+        self._pending_log_prob = None
+        self._pending_entropy = None
+
         # Statistics
         self._step_count: int = 0
         self._last_loss: float = 0.0
@@ -339,7 +343,7 @@ class OnlineLearner:
 
     def load(self, path: str) -> None:
         """Load model + optimiser state from *path*."""
-        ck = torch.load(path, map_location=self.device)
+        ck = torch.load(path, map_location=self.device, weights_only=True)
         self.net.load_state_dict(ck["model"])
         self.optimizer.load_state_dict(ck["optimizer"])
         self._step_count = ck.get("step", 0)

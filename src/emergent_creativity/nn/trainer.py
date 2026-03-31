@@ -402,7 +402,7 @@ class PPOTrainer:
         print(f"[Trainer] Saved checkpoint → {path}")
 
     def load(self, path: str) -> None:
-        ck = torch.load(path, map_location=self.device)
+        ck = torch.load(path, map_location=self.device, weights_only=True)
         self.net.load_state_dict(ck["model"])
         self.optimizer.load_state_dict(ck["optimizer"])
         self._global_step = ck.get("step", 0)
