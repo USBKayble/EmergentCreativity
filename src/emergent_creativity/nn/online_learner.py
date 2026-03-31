@@ -135,6 +135,10 @@ class OnlineLearner:
         self._pending_log_prob = None
         self._pending_entropy = None
 
+        self._pending_value = None
+        self._pending_log_prob = None
+        self._pending_entropy = None
+
         # Statistics
         self._step_count: int = 0
         self._last_loss: float = 0.0
