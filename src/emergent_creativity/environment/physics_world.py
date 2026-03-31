@@ -12,7 +12,6 @@ Responsibilities
   - querying contact points,
   - rendering camera images that the tenant's visual sense can consume.
 """
-from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
