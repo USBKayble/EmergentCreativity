@@ -1,0 +1,38 @@
+name: Issue Worker
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  auto-work-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Invoke Jules
+        uses: google-labs-code/jules-invoke@v1.0.0
+        with:
+          prompt: |
+            You have been assigned to autonomously resolve the following GitHub issue:
+
+            ## ${{ github.event.issue.title }}
+
+            ${{ github.event.issue.body }}
+
+            # Instructions
+            1. **Information Gathering**: Read the issue details carefully. If the issue is vague, lacks critical reproduction steps, or doesn't provide enough context to begin working, **stop** and use the GitHub CLI or API to comment on the issue asking for the missing information. Do not attempt to guess or proceed blindly if blocked by missing context.
+            2. **Analysis and Exploration**: Explore the codebase to locate the relevant files and logic. Understand how the requested change fits into the existing architecture.
+            3. **Implementation**: Implement the requested feature or fix the bug. Ensure your changes are minimal, targeted, and follow the project's coding standards.
+            4. **Testing**: Write or update tests to verify your changes. Ensure no existing tests are broken.
+            5. **Finalization**: You must operate completely autonomously. Do not use tools that ask for user input. Once you have verified your work and ensured all tests pass, submit your code.
+
+            # Important Directives
+            - You are completely autonomous. **DO NOT** ask for user input.
+            - If you need clarification from the issue author, leave a comment on the issue and exit gracefully.
+            - Ensure all tests pass before submitting.
+          jules_api_key: ${{ secrets.JULES_API_KEY }}
+          starting_branch: 'main'

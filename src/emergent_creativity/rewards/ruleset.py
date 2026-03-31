@@ -61,9 +61,9 @@ import numpy as np
 ROOM_W = 5.0
 ROOM_D = 5.0
 
-
 # Default config path (relative to project root)
 DEFAULT_CONFIG = Path(__file__).parents[3] / "config" / "rewards.yaml"
+
 
 def _eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
     """Safely evaluate a parsed AST expression."""
@@ -110,7 +110,9 @@ def _eval_ast(node: ast.AST, ctx: Dict[str, Any]) -> Any:
             elif isinstance(op, ast.GtE):
                 res = left >= right
             else:
-                raise ValueError(f"Unsupported comparison operator: {type(op).__name__}")
+                raise ValueError(
+                    f"Unsupported comparison operator: {type(op).__name__}"
+                )
             if not res:
                 return False
             left = right
@@ -258,6 +260,8 @@ class RewardEvaluator:
             "near_book": 0.0,
             "near_game": 0.0,
         }
+        self._registry_version: int = -1
+        self._relevant_objects: List[Any] = []
         self._prev_vitals: Optional[Dict[str, float]] = None
         self._reward_history: List[float] = []
         self._running_mean: float = 0.0
@@ -323,7 +327,28 @@ class RewardEvaluator:
         if registry is None:
             return result
 
-        for obj in registry.all():
+        current_version = getattr(registry, "_version", -1)
+        if current_version != self._registry_version:
+            self._registry_version = current_version
+            self._relevant_objects = [
+                obj
+                for obj in registry.all()
+                if obj.name
+                in (
+                    "fridge",
+                    "stove",
+                    "apple",
+                    "pizza",
+                    "water_bottle",
+                    "bed",
+                    "toilet",
+                    "tv",
+                )
+                or "book" in obj.name
+                or "game" in obj.name
+            ]
+
+        for obj in self._relevant_objects:
             dist = registry.distance(obj.body_id, pos)
             if dist > 3.0:
                 continue
@@ -363,31 +388,16 @@ class RewardEvaluator:
     # Evaluation
     # ------------------------------------------------------------------
 
-    def evaluate(self, tenant: Any, registry: Any) -> tuple[float, dict]:
-        """
-        Calculate the total reward for the current step.
-
-        Parameters
-        ----------
-        tenant   : Tenant     – the agent with vitals, events, flags
-        registry : ObjectRegistry
-
-        Returns
-        -------
-        total_reward : float
-        info         : dict  – per-rule breakdown
-        """
-        vitals = tenant.vitals
-        pos = tenant.get_position()
-
-        room = self._get_room(pos)
-        proximity = self._get_proximity_to_objects(pos, registry)
-
-        smell_intensities = self._get_smell_intensities(
-            tenant._sensors.smell.observe(pos) if hasattr(tenant, "_sensors") else None
-        )
-
-        ctx = {
+    def _build_context(
+        self,
+        tenant: Any,
+        registry: Any,
+        vitals: Any,
+        room: str,
+        proximity: Dict[str, float],
+        smell_intensities: Dict[str, float],
+    ) -> Dict[str, Any]:
+        return {
             "hunger": vitals.hunger,
             "energy": vitals.energy,
             "bladder": vitals.bladder,
@@ -413,10 +423,7 @@ class RewardEvaluator:
             "smell_floral": smell_intensities["smell_floral"],
         }
 
-        total = 0.0
-        info: dict = {}
-
-        critical_mult = self._get_critical_need_multiplier(vitals)
+    def _determine_action_type(self, tenant: Any) -> str:
         action_type = "idle"
         if tenant.is_sleeping:
             action_type = "sleep"
@@ -426,9 +433,13 @@ class RewardEvaluator:
             action_type = "eating"
         elif any(e in ["used_toilet"] for e in tenant.events):
             action_type = "bathroom"
+        return action_type
 
-        decay = self._get_action_decay(action_type)
-
+    def _evaluate_rules(
+        self, tenant: Any, ctx: Dict[str, Any], decay: float
+    ) -> tuple[float, dict]:
+        total = 0.0
+        info = {}
         for rule in self._rules:
             earned = 0.0
 
@@ -453,15 +464,15 @@ class RewardEvaluator:
                 earned *= decay
                 info[rule.name] = earned
                 total += earned
+        return total, info
 
-        self._update_action_count(action_type)
-
-        guidance_reward, guidance_info = self._compute_guidance_rewards(
-            vitals, smell_intensities, room, proximity, pos, critical_mult, decay
-        )
-        total += guidance_reward
-        info.update(guidance_info)
-
+    def _update_state(
+        self,
+        tenant: Any,
+        pos: Tuple[float, float, float],
+        smell_intensities: Dict[str, float],
+        proximity: Dict[str, float],
+    ) -> None:
         self._prev_pos = pos
         self._prev_smell = smell_intensities
         self._prev_proximity = proximity.copy()
@@ -474,6 +485,50 @@ class RewardEvaluator:
             tenant.events.append("playing_game")
         if tenant.is_sleeping:
             tenant.events.append("sleeping")
+
+    def evaluate(self, tenant: Any, registry: Any) -> tuple[float, dict]:
+        """
+        Calculate the total reward for the current step.
+
+        Parameters
+        ----------
+        tenant   : Tenant     – the agent with vitals, events, flags
+        registry : ObjectRegistry
+
+        Returns
+        -------
+        total_reward : float
+        info         : dict  – per-rule breakdown
+        """
+        vitals = tenant.vitals
+        pos = tenant.get_position()
+
+        room = self._get_room(pos)
+        proximity = self._get_proximity_to_objects(pos, registry)
+
+        smell_intensities = self._get_smell_intensities(
+            tenant._sensors.smell.observe(pos) if hasattr(tenant, "_sensors") else None
+        )
+
+        ctx = self._build_context(
+            tenant, registry, vitals, room, proximity, smell_intensities
+        )
+
+        critical_mult = self._get_critical_need_multiplier(vitals)
+        action_type = self._determine_action_type(tenant)
+        decay = self._get_action_decay(action_type)
+
+        total, info = self._evaluate_rules(tenant, ctx, decay)
+
+        self._update_action_count(action_type)
+
+        guidance_reward, guidance_info = self._compute_guidance_rewards(
+            vitals, smell_intensities, room, proximity, pos, critical_mult, decay
+        )
+        total += guidance_reward
+        info.update(guidance_info)
+
+        self._update_state(tenant, pos, smell_intensities, proximity)
 
         return total, info
 
