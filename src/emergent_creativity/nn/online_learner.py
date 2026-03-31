@@ -152,6 +152,10 @@ class OnlineLearner:
         self._pending_log_prob: Optional["torch.Tensor"] = None
         self._pending_entropy: Optional["torch.Tensor"] = None
 
+        self._pending_log_prob = None
+        self._pending_value = None
+        self._pending_entropy = None
+
         print(
             f"[OnlineLearner] Initialised on {self.device}. "
             f"Gradient update on every environment step."
