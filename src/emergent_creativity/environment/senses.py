@@ -15,7 +15,6 @@ Sense breakdown
 4. **Smell**    – nearby smell intensities per SmellType (float32 vector)
 5. **Taste**    – active only when eating; returns taste vector (float32)
 """
-from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
