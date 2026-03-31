@@ -1,5 +1,6 @@
 """
 tests/test_network.py
+=====================
 Unit tests for the neural network architecture.
 These tests require PyTorch but NOT PyBullet or Gymnasium.
 Skipped automatically if torch is unavailable.
@@ -47,8 +48,9 @@ class TestTenantNetworkShapes:
         logits, value, (hx, cx) = net(vision, nv)
         assert logits.shape == (2, N_ACTIONS)
         assert value.shape  == (2, 1)
-        assert hx.shape     == (2, 1024)
-        assert cx.shape     == (2, 1024)
+        from src.emergent_creativity.nn.architecture import HIDDEN_DIM
+        assert hx.shape     == (2, HIDDEN_DIM)
+        assert cx.shape     == (2, HIDDEN_DIM)
 
     def test_lstm_state_passed_through(self, net, dummy_batch):
         vision, nv = dummy_batch
