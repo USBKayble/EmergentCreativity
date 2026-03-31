@@ -43,7 +43,7 @@ Example
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -61,7 +61,7 @@ except ImportError:
     except ImportError:
         _GYM = False
 
-from .environment.physics_world import PhysicsWorld, CameraSpec, PhysicsConfig
+from .environment.physics_world import PhysicsWorld, CameraSpec
 from .environment.objects import ObjectRegistry
 from .environment.apartment import Apartment
 from .environment.senses import (
@@ -175,8 +175,9 @@ class TenantEnv:
     def step(
         self, action: int
     ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, dict]:
-        """Apply *action*, advance simulation by one step."""
-        assert self._initialised, "Call reset() first."
+        """Advances the environment by one step."""
+        if self._tenant is None or self.physics is None or self._evaluator is None:
+            raise RuntimeError("Environment not built. Call reset() first.")
 
         # Execute action
         self._tenant.step(action)
@@ -230,7 +231,6 @@ class TenantEnv:
     def _build(self, seed: int) -> None:
         """First-time initialisation."""
         import yaml
-        from pathlib import Path as _P
 
         cfg_path = str(DEFAULT_CONFIG)
         try:

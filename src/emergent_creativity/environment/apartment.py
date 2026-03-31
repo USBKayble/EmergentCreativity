@@ -22,15 +22,16 @@ All furniture is created as static boxes (mass=0).
 Pickable objects (food, books, mess) are dynamic.
 """
 
-from __future__ import annotations
-
+import math
 import random
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from .physics_world import PhysicsWorld
 from .objects import (
+    ObjectCategory,
     ObjectRegistry,
     WorldObject,
+    OBJECT_FACTORIES,
     make_apple,
     make_pizza,
     make_water_bottle,
@@ -290,12 +291,14 @@ class Apartment:
         hw = WALL_T / 2
         dw2 = DOOR_W / 2
         h2 = CEILING_H / 2
+        span_len = span_end - span_start
 
         door_left = door_center - dw2
         door_right = door_center + dw2
 
         # Above doorway lintel
         lintel_h = (CEILING_H - DOOR_H) / 2
+        door_top_centre = DOOR_H + lintel_h
 
         for seg_start, seg_end in [
             (span_start, door_left),
@@ -361,7 +364,7 @@ class Apartment:
 
     def _build_living_room_furniture(self) -> None:
         ox, oy = self.living_room_origin()
-        cx = ox + ROOM_W / 2
+        cx, cy = ox + ROOM_W / 2, oy + ROOM_D / 2
 
         # Sofa facing TV
         sofa = make_sofa()
