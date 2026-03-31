@@ -27,11 +27,12 @@ class TestApartment:
 
         apartment = Apartment(world=world_mock, registry=registry_mock)
 
-        with patch.object(apartment, '_build_floor') as mock_build_floor, \
-             patch.object(apartment, '_build_walls') as mock_build_walls, \
-             patch.object(apartment, '_build_furniture') as mock_build_furniture, \
-             patch.object(apartment, '_place_items') as mock_place_items:
-
+        with (
+            patch.object(apartment, "_build_floor") as mock_build_floor,
+            patch.object(apartment, "_build_walls") as mock_build_walls,
+            patch.object(apartment, "_build_furniture") as mock_build_furniture,
+            patch.object(apartment, "_place_items") as mock_place_items,
+        ):
             apartment.build()
 
             mock_build_floor.assert_called_once()
@@ -45,9 +46,7 @@ class TestApartmentInit:
         world_mock = MagicMock(spec=PhysicsWorld)
         registry_mock = MagicMock(spec=ObjectRegistry)
 
-        apartment = Apartment(
-            world=world_mock, registry=registry_mock, seed=123
-        )
+        apartment = Apartment(world=world_mock, registry=registry_mock, seed=123)
 
         assert apartment._world is world_mock
         assert apartment._registry is registry_mock
