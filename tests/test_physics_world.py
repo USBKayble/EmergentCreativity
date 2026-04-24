@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+from unittest.mock import patch
 
 pb = pytest.importorskip("pybullet")
 
@@ -93,3 +94,19 @@ def test_render_camera(physics_world):
 
     assert isinstance(img, np.ndarray)
     assert img.shape == (h, w, 3)
+
+
+def test_disconnect_exception():
+    world = PhysicsWorld(gui=False)
+    # Simulate an active connection without actually starting pybullet
+    world._client = 1
+    world._body_ids = [999]
+
+    with patch("src.emergent_creativity.environment.physics_world.pb.disconnect") as mock_disconnect:
+        mock_disconnect.side_effect = Exception("Simulated disconnect failure")
+
+        # stop() should catch the exception and reset client/body_ids
+        world.stop()
+
+    assert world.client == -1
+    assert len(world.body_ids) == 0
