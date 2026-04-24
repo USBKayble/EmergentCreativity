@@ -7,7 +7,9 @@ These tests do NOT require PyBullet, Torch, or any heavy dependency.
 
 from __future__ import annotations
 
+import sys
 import pytest
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers / stubs
@@ -74,7 +76,8 @@ class _MockTenant:
 # Tests for Rule parsing
 # ---------------------------------------------------------------------------
 
-from src.emergent_creativity.rewards.ruleset import Rule, RewardEvaluator
+with patch.dict(sys.modules, {'numpy': MagicMock()}):
+    from src.emergent_creativity.rewards.ruleset import Rule, RewardEvaluator
 
 
 class TestRuleParsing:
@@ -141,6 +144,11 @@ class TestRuleParsing:
     def test_invalid_condition_returns_false(self):
         rule = Rule({"condition": "undefined_var > 0", "reward": 1.0})
         assert rule.evaluate_condition({}) is False
+
+    def test_condition_evaluation_exception(self):
+        # The condition compiles to a valid AST, but evaluation throws ZeroDivisionError
+        rule = Rule({"condition": "hunger / 0", "reward": 1.0})
+        assert rule.evaluate_condition({"hunger": 1.0}) is False
 
 
 # ---------------------------------------------------------------------------
