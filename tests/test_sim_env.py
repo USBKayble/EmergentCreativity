@@ -71,3 +71,48 @@ class TestTenantEnvStep:
             "mess_count": 2,
             "step": 42,
         }
+
+    def test_build_yaml_parsing_error_fallback(self, monkeypatch):
+        # Create environment
+        env = TenantEnv()
+
+        # Mock dependencies to avoid actual instantiation during test
+        from src.emergent_creativity.sim_env import CameraSpec
+        mock_camera_spec = MagicMock(spec=CameraSpec)
+        monkeypatch.setattr("src.emergent_creativity.sim_env.CameraSpec", mock_camera_spec)
+
+        mock_physics_world = MagicMock()
+        monkeypatch.setattr("src.emergent_creativity.sim_env.PhysicsWorld", mock_physics_world)
+
+        mock_apartment = MagicMock()
+        monkeypatch.setattr("src.emergent_creativity.sim_env.Apartment", mock_apartment)
+
+        mock_sensory_suite = MagicMock()
+        monkeypatch.setattr("src.emergent_creativity.sim_env.SensorySuite", mock_sensory_suite)
+
+        mock_tenant = MagicMock()
+        monkeypatch.setattr("src.emergent_creativity.sim_env.Tenant", mock_tenant)
+
+        # Mock 'open' to raise an Exception, simulating a YAML parsing error or missing file
+        def mock_open(*args, **kwargs):
+            raise Exception("Simulated YAML exception")
+        monkeypatch.setattr("builtins.open", mock_open)
+
+        # Import constants to assert against
+        from src.emergent_creativity.environment.senses import VISION_W, VISION_H
+
+        # Call the private build method
+        env._build(seed=0)
+
+        # Assert that CameraSpec received the default values since obs_cfg was fallback {}
+        mock_camera_spec.assert_called_once_with(width=VISION_W, height=VISION_H, fov=90.0)
+
+        # Assert that SensorySuite received the empty obs_cfg dictionary
+        # It's called with: SensorySuite(self._world, self._registry, agent_body_id=-1, cfg=obs_cfg)
+        mock_sensory_suite.assert_called_once()
+        assert mock_sensory_suite.call_args.kwargs.get('cfg') == {}
+
+        # Assert that Tenant received the empty vitals_cfg dictionary
+        # It's called with: Tenant(self._world, self._registry, self._sensors, vitals_cfg=vitals_cfg)
+        mock_tenant.assert_called_once()
+        assert mock_tenant.call_args.kwargs.get('vitals_cfg') == {}
